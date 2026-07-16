@@ -96,6 +96,12 @@
     </div>
 </div>
 
+<!-- IMAGE ZOOM MODAL -->
+<div id="img-zoom-modal" onclick="closeZoom()" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.92);align-items:center;justify-content:center;cursor:zoom-out">
+    <img id="img-zoom-el" style="max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px;box-shadow:0 25px 60px rgba(0,0,0,0.8)">
+    <button onclick="closeZoom()" style="position:absolute;top:16px;right:20px;background:rgba(255,255,255,0.1);border:none;color:#fff;font-size:22px;cursor:pointer;width:36px;height:36px;border-radius:50%">✕</button>
+</div>
+
 <!-- TOAST -->
 <div id="drive-toast">
     <span id="toast-icon" style="font-size:18px;flex-shrink:0">💾</span>
@@ -191,7 +197,10 @@
                     <button onclick="previewAndExportPDF()" class="bg-pantone text-black text-xs font-black px-4 py-2 rounded-lg cursor-pointer hover:opacity-90 shadow flex items-center gap-1.5">
                         👁 Preview PDF
                     </button>
-                    <button onclick="clearEditorForm()" class="text-xs text-gray-500 hover:text-gray-300 border border-gray-800 px-3 py-1.5 rounded-lg cursor-pointer transition">🗑 Clear Form</button>
+                    <button onclick="exitEditor()" class="text-xs text-gray-500 hover:text-gray-300 border border-gray-800 px-3 py-1.5 rounded-lg cursor-pointer transition flex items-center gap-1.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                        Exit
+                    </button>
                 </div>
             </div>
             <div id="editor-form-container"></div>
@@ -375,13 +384,42 @@ function switchSheet(key) {
 function initEditorForm(existingItem = null, idx = null) {
     editingIdx = idx;
     editorItem = existingItem ? JSON.parse(JSON.stringify(existingItem)) : createBlankItem((currentData.main_items.length + 1).toString());
+    // Snapshot for change detection
+    editorSnapshot = JSON.stringify(editorItem);
     renderEditorForm();
+}
+
+let editorSnapshot = null;
+
+function editorHasChanges() {
+    return JSON.stringify(editorItem) !== editorSnapshot;
+}
+
+function exitEditor() {
+    if (!editorHasChanges()) {
+        // Nothing changed — go straight to consolidated
+        switchSheet('consolidated');
+        return;
+    }
+    // Changes detected — ask user what to do
+    const choice = confirm('You have unsaved changes.\n\nClick OK to submit and save to Consolidated Manager.\nClick Cancel to discard changes and exit.');
+    if (choice) {
+        // Submit first then switch
+        submitToConsolidated();
+    } else {
+        // Discard and exit
+        editingIdx = null;
+        editorItem = createBlankItem((currentData.main_items.length + 1).toString());
+        editorSnapshot = JSON.stringify(editorItem);
+        switchSheet('consolidated');
+    }
 }
 
 function clearEditorForm() {
     if (!confirm('Clear all form data?')) return;
     editingIdx = null;
     editorItem = createBlankItem((currentData.main_items.length + 1).toString());
+    editorSnapshot = JSON.stringify(editorItem);
     renderEditorForm();
 }
 
@@ -1172,7 +1210,7 @@ function buildConsolidatedCard(item, idx) {
         <td class="px-3 py-2">
             <div class="flex items-center gap-1 flex-nowrap">
                 <button onclick="exportCardPDF(${idx})" class="bg-pantone text-black text-[9px] font-black px-2 py-1.5 rounded cursor-pointer hover:opacity-90 whitespace-nowrap shrink-0">📄 PDF</button>
-                <button onclick="openPdfReport(${idx})" title="Preview PDF" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold px-2 py-1.5 rounded cursor-pointer whitespace-nowrap shrink-0">👁</button>
+                <button onclick="openPdfReport(${idx})" title="Preview PDF" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold px-2 py-1.5 rounded cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1">👁 Preview PDF</button>
                 ${item.drive_pdf_url ? `
                 <a href="${item.drive_pdf_url}" target="_blank" class="bg-blue-900/40 hover:bg-blue-900/70 border border-blue-700/50 text-blue-300 text-[9px] font-bold px-2 py-1.5 rounded no-underline cursor-pointer whitespace-nowrap shrink-0">🔗 Drive</a>
                 <button onclick="clearDriveLink(${idx})" class="text-gray-600 hover:text-red-400 text-[9px] cursor-pointer shrink-0 px-0.5" title="Clear link">✕</button>
@@ -1261,12 +1299,14 @@ function writeReportToIframe(item) {
         }
         #pdf-preview-content table { width:100%; border-collapse:collapse; }
         #pdf-preview-content td, #pdf-preview-content th { border:1px solid #9ca3af; padding:6px 10px; vertical-align:top; }
-        #pdf-preview-content img { max-width:100%; height:auto; object-fit:contain; }
+        #pdf-preview-content img { max-width:100%; height:auto; object-fit:contain; cursor:zoom-in; }
     </style>
     <div class="report-page">
         <div class="page-label">Page 1 — Main Specification</div>
         ${buildReportHTML(item)}
     </div>`;
+    // Make all images zoomable after render
+    setTimeout(() => makePreviewImagesZoomable(), 100);
 }
 
 function closePdfPopup() {
@@ -1371,10 +1411,10 @@ function buildReportHTML(item) {
             <!-- GIFT BOX -->
             <tr style="background:#dbeafe"><td colspan="6" style="padding:8px;border:1px solid #9ca3af;font-weight:900;font-size:11px;text-transform:uppercase;color:#1e3a8a">PRODUCT PACKAGING (GIFT BOX) SPECIFICATIONS</td></tr>
             <tr>
-                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Box Dim (CM):</td>
-                <td colspan="3" style="padding:6px 10px;border:1px solid #9ca3af">L: ${item.gb_l||'—'} cm &nbsp;|&nbsp; W: ${item.gb_w||'—'} cm &nbsp;|&nbsp; H: ${item.gb_h||'—'} cm</td>
+                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Box Dim:</td>
+                <td colspan="3" style="padding:6px 10px;border:1px solid #9ca3af">L: ${item.gb_l||'—'} cm ${item.gb_l?'('+(parseFloat(item.gb_l)/2.54).toFixed(2)+' inch)':''} &nbsp;|&nbsp; W: ${item.gb_w||'—'} cm ${item.gb_w?'('+(parseFloat(item.gb_w)/2.54).toFixed(2)+' inch)':''} &nbsp;|&nbsp; H: ${item.gb_h||'—'} cm ${item.gb_h?'('+(parseFloat(item.gb_h)/2.54).toFixed(2)+' inch)':''}</td>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Gross Weight:</td>
-                <td style="padding:6px 10px;border:1px solid #9ca3af">${item.gb_weight||'—'} kg</td>
+                <td style="padding:6px 10px;border:1px solid #9ca3af">${item.gb_weight||'—'} kg ${item.gb_weight?'('+(parseFloat(item.gb_weight)*2.205).toFixed(2)+' lbs)':''}</td>
             </tr>
             <tr>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Qty / Carton:</td>
@@ -1592,9 +1632,9 @@ function buildItemFormHTML(item, mIdx, isEditor) {
         <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
             <div class="text-[11px] font-black text-yellow-500 uppercase tracking-widest">Outer Master Carton Packaging</div>
             <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-                <div><label class="text-gray-400 block mb-1 font-bold">L (CM)</label><input type="text" value="${item.mc_l||''}" oninput="${dataRef}.mc_l=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.mc_l ? (parseFloat(item.mc_l)/2.54).toFixed(2)+' in' : ''}</p></div>
-                <div><label class="text-gray-400 block mb-1 font-bold">W (CM)</label><input type="text" value="${item.mc_w||''}" oninput="${dataRef}.mc_w=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.mc_w ? (parseFloat(item.mc_w)/2.54).toFixed(2)+' in' : ''}</p></div>
-                <div><label class="text-gray-400 block mb-1 font-bold">H (CM)</label><input type="text" value="${item.mc_h||''}" oninput="${dataRef}.mc_h=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.mc_h ? (parseFloat(item.mc_h)/2.54).toFixed(2)+' in' : ''}</p></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">L (CM)</label><input type="text" value="${item.mc_l||''}" oninput="${dataRef}.mc_l=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.mc_l ? (parseFloat(item.mc_l)/2.54).toFixed(2)+' inch' : ''}</p></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">W (CM)</label><input type="text" value="${item.mc_w||''}" oninput="${dataRef}.mc_w=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.mc_w ? (parseFloat(item.mc_w)/2.54).toFixed(2)+' inch' : ''}</p></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">H (CM)</label><input type="text" value="${item.mc_h||''}" oninput="${dataRef}.mc_h=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.mc_h ? (parseFloat(item.mc_h)/2.54).toFixed(2)+' inch' : ''}</p></div>
                 <div><label class="text-gray-400 block mb-1 font-bold">Weight (KG)</label><input type="text" value="${item.mc_weight||''}" oninput="${dataRef}.mc_weight=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.mc_weight ? (parseFloat(item.mc_weight)*2.205).toFixed(2)+' lbs' : ''}</p></div>
                 <div><label class="text-gray-400 block mb-1 font-bold">Qty/Carton</label><input type="text" value="${item.mc_qty||''}" oninput="${dataRef}.mc_qty=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
                 <div class="md:col-span-5"><label class="text-gray-400 block mb-1 font-bold">Carton Remarks</label><input type="text" value="${item.mc_remarks||''}" oninput="${dataRef}.mc_remarks=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
@@ -1617,10 +1657,10 @@ function buildItemFormHTML(item, mIdx, isEditor) {
         <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
             <div class="text-[11px] font-black text-blue-400 uppercase tracking-widest">Product Packaging (Gift Box)</div>
             <div class="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
-                <div><label class="text-gray-400 block mb-1 font-bold">L (CM)</label><input type="text" value="${item.gb_l||''}" oninput="${dataRef}.gb_l=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
-                <div><label class="text-gray-400 block mb-1 font-bold">W (CM)</label><input type="text" value="${item.gb_w||''}" oninput="${dataRef}.gb_w=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
-                <div><label class="text-gray-400 block mb-1 font-bold">H (CM)</label><input type="text" value="${item.gb_h||''}" oninput="${dataRef}.gb_h=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
-                <div><label class="text-gray-400 block mb-1 font-bold">Weight (KG)</label><input type="text" value="${item.gb_weight||''}" oninput="${dataRef}.gb_weight=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">L (CM)</label><input type="text" value="${item.gb_l||''}" oninput="${dataRef}.gb_l=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.gb_l?(parseFloat(item.gb_l)/2.54).toFixed(2)+' inch':''}</p></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">W (CM)</label><input type="text" value="${item.gb_w||''}" oninput="${dataRef}.gb_w=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.gb_w?(parseFloat(item.gb_w)/2.54).toFixed(2)+' inch':''}</p></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">H (CM)</label><input type="text" value="${item.gb_h||''}" oninput="${dataRef}.gb_h=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.gb_h?(parseFloat(item.gb_h)/2.54).toFixed(2)+' inch':''}</p></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">Weight (KG)</label><input type="text" value="${item.gb_weight||''}" oninput="${dataRef}.gb_weight=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.gb_weight?(parseFloat(item.gb_weight)*2.205).toFixed(2)+' lbs':''}</p></div>
                 <div><label class="text-gray-400 block mb-1 font-bold">Qty/Carton</label><input type="text" value="${item.gb_qty||''}" oninput="${dataRef}.gb_qty=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
                 <div><label class="text-gray-400 block mb-1 font-bold">Artwork URL</label><input type="text" value="${item.gb_artwork||''}" oninput="${dataRef}.gb_artwork=this.value" placeholder="URL" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
                 <div class="md:col-span-6"><label class="text-gray-400 block mb-1 font-bold">Gift Box Remarks</label><input type="text" value="${item.gb_remarks||''}" oninput="${dataRef}.gb_remarks=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
@@ -1979,6 +2019,33 @@ async function deletePhoto(type, key, sIdx=null) {
 }
 
 
+// ============================================================
+// IMAGE ZOOM
+// ============================================================
+function openZoom(src) {
+    const modal = document.getElementById('img-zoom-modal');
+    const img = document.getElementById('img-zoom-el');
+    img.src = src;
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeZoom() {
+    document.getElementById('img-zoom-modal').style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+function makePreviewImagesZoomable() {
+    const container = document.getElementById('pdf-preview-content');
+    if (!container) return;
+    container.querySelectorAll('img').forEach(img => {
+        img.style.cursor = 'zoom-in';
+        img.title = 'Click to zoom';
+        img.onclick = (e) => { e.stopPropagation(); openZoom(img.src); };
+    });
+}
+
+// ============================================================
 function pasteTableFromSheets(event, type) {
     event.preventDefault();
     const text = (event.clipboardData || window.clipboardData).getData('text');
