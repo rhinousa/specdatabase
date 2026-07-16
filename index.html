@@ -303,7 +303,7 @@ let editingIdx = null;                  // null = new, number = editing existing
 let activePasteTarget = null;
 
 const primaryPhotoKeys = [
-    { key:'product_photo', label:'Finished Product' },
+    { key:'product_photo', label:'Marketing Image' },
     { key:'pkg_content_photo', label:'Package Content' },
     { key:'front_photo', label:'Front View' },
     { key:'rear_photo', label:'Rear View' },
@@ -1358,7 +1358,7 @@ function buildReportHTML(item) {
 
             <!-- MAIN PRODUCT PHOTOS -->
             <tr style="background:#e5e7eb">
-                <td colspan="3" style="padding:8px;border:1px solid #9ca3af;text-align:center;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#111827">FINISHED PRODUCT IMAGE</td>
+                <td colspan="3" style="padding:8px;border:1px solid #9ca3af;text-align:center;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#111827">MARKETING IMAGE IMAGE</td>
                 <td colspan="3" style="padding:8px;border:1px solid #9ca3af;text-align:center;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#111827">PACKAGE CONTENT IMAGE</td>
             </tr>
             <tr>
@@ -1391,9 +1391,9 @@ function buildReportHTML(item) {
             <tr>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Carton Dim:</td>
                 <td colspan="3" style="padding:6px 10px;border:1px solid #9ca3af">
-                    L: ${item.mc_l||'—'} cm ${item.mc_l?'('+( parseFloat(item.mc_l)/2.54).toFixed(2)+'″)':''} &nbsp;|&nbsp;
-                    W: ${item.mc_w||'—'} cm ${item.mc_w?'('+(parseFloat(item.mc_w)/2.54).toFixed(2)+'″)':''} &nbsp;|&nbsp;
-                    H: ${item.mc_h||'—'} cm ${item.mc_h?'('+(parseFloat(item.mc_h)/2.54).toFixed(2)+'″)':''}
+                    L: ${item.mc_l||'—'} cm ${item.mc_l?'('+(parseFloat(item.mc_l)/2.54).toFixed(2)+' inch)':''} &nbsp;|&nbsp;
+                    W: ${item.mc_w||'—'} cm ${item.mc_w?'('+(parseFloat(item.mc_w)/2.54).toFixed(2)+' inch)':''} &nbsp;|&nbsp;
+                    H: ${item.mc_h||'—'} cm ${item.mc_h?'('+(parseFloat(item.mc_h)/2.54).toFixed(2)+' inch)':''}
                 </td>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Gross Weight:</td>
                 <td style="padding:6px 10px;border:1px solid #9ca3af">${item.mc_weight||'—'} kg ${item.mc_weight?'('+(parseFloat(item.mc_weight)*2.205).toFixed(2)+' lbs)':''}</td>
