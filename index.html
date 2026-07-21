@@ -139,6 +139,12 @@
                 <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block px-2 mb-2">Editor</span>
                 <button onclick="switchSheet('sheet1')" id="tab-sheet1" class="w-full text-left px-3 py-2 rounded-lg text-sm font-bold bg-pantone text-black flex items-center gap-2 transition cursor-pointer shadow">📝 New Spec Entry</button>
             </div>
+            <div id="tab-edit-group" class="space-y-1 hidden">
+                <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block px-2 mb-2">Editing</span>
+                <button onclick="switchSheet('edit')" id="tab-edit" class="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white flex items-center gap-2 transition cursor-pointer">
+                    ✏️ <span id="tab-edit-label" class="truncate">Edit Item</span>
+                </button>
+            </div>
             <div class="space-y-1">
                 <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block px-2 mb-2">Directory</span>
                 <button onclick="switchSheet('consolidated')" id="tab-consolidated" class="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white flex items-center gap-2 transition cursor-pointer">
@@ -190,8 +196,8 @@
             <!-- Header -->
             <div class="flex items-center justify-between mb-2">
                 <div>
-                    <h1 class="text-lg font-black text-white tracking-tight">New Product Specification Entry</h1>
-                    <p class="text-xs text-gray-500 mt-0.5">Fill in all fields, then submit to save into the Consolidated Manager.</p>
+                    <h1 id="editor-header-title" class="text-lg font-black text-white tracking-tight">New Product Specification Entry</h1>
+                    <p id="editor-header-sub" class="text-xs text-gray-500 mt-0.5">Fill in all fields, then submit to save into the Consolidated Manager.</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <button onclick="previewAndExportPDF()" class="bg-pantone text-black text-xs font-black px-4 py-2 rounded-lg cursor-pointer hover:opacity-90 shadow flex items-center gap-1.5">
@@ -353,29 +359,75 @@ function createBlankItem(id) {
 // ============================================================
 // NAVIGATION
 // ============================================================
+function setEditorHeader(isEdit) {
+    const title = document.getElementById('editor-header-title');
+    const sub = document.getElementById('editor-header-sub');
+    if (!title || !sub) return;
+    if (isEdit) {
+        title.textContent = 'Edit Product Specification';
+        sub.textContent = 'Editing an existing entry — submit to update it in the Consolidated Manager.';
+    } else {
+        title.textContent = 'New Product Specification Entry';
+        sub.textContent = 'Fill in all fields, then submit to save into the Consolidated Manager.';
+    }
+}
+
+function updateEditTabVisibility() {
+    const grp = document.getElementById('tab-edit-group');
+    if (!grp) return;
+    if (editingIdx !== null && editingIdx !== undefined) {
+        grp.classList.remove('hidden');
+        const label = document.getElementById('tab-edit-label');
+        if (label) label.textContent = (editorItem && (editorItem.sku_no || editorItem.description)) || 'Edit Item';
+    } else {
+        grp.classList.add('hidden');
+    }
+}
+
 function switchSheet(key) {
+    // Guard: leaving the editor with unsaved changes should ask for confirmation first
+    const editorCurrentlyVisible = !document.getElementById('sheet1-view').classList.contains('hidden');
+    if (editorCurrentlyVisible && editorItem && typeof editorHasChanges === 'function' && editorHasChanges()) {
+        const leavingEditor = (key === 'consolidated') || (key === 'sheet1' && editingIdx !== null);
+        if (leavingEditor) {
+            const ok = confirm('You have unsaved changes on this item.\n\nAre you sure you want to leave without saving? Click Cancel to keep editing.');
+            if (!ok) return;
+        }
+    }
+
     document.getElementById('sheet1-view').classList.add('hidden');
     document.getElementById('consolidated-view').classList.add('hidden');
     const base = "w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white flex items-center gap-2 transition cursor-pointer";
     const active = "w-full text-left px-3 py-2 rounded-lg text-sm font-bold bg-pantone text-black flex items-center gap-2 transition cursor-pointer shadow";
     document.getElementById('tab-sheet1').className = base;
     document.getElementById('tab-consolidated').className = base;
+    const tabEditBtn = document.getElementById('tab-edit');
+    if (tabEditBtn) tabEditBtn.className = base;
 
     const wrapper = document.getElementById('main-wrapper');
 
     if (key === 'sheet1') {
         if (!canEdit()) { switchSheet('consolidated'); return; }
+        // "New Spec Entry" always starts a fresh, blank item — it never shows an item being edited
+        initEditorForm();
+        setEditorHeader(false);
         document.getElementById('sheet1-view').classList.remove('hidden');
         document.getElementById('tab-sheet1').className = active;
         wrapper.className = 'p-4 sm:p-8 max-w-5xl mx-auto';
-        if (!editorItem) initEditorForm();
-        else renderEditorForm();
+    } else if (key === 'edit') {
+        if (!canEdit() || editingIdx === null) { switchSheet('consolidated'); return; }
+        setEditorHeader(true);
+        document.getElementById('sheet1-view').classList.remove('hidden');
+        if (tabEditBtn) tabEditBtn.className = active;
+        wrapper.className = 'p-4 sm:p-8 max-w-5xl mx-auto';
+        renderEditorForm();
     } else {
         document.getElementById('consolidated-view').classList.remove('hidden');
         document.getElementById('tab-consolidated').className = active;
         wrapper.className = 'p-4 sm:p-6';
         buildConsolidatedView();
     }
+    updateEditTabVisibility();
 }
 
 // ============================================================
@@ -781,6 +833,9 @@ function submitToConsolidated() {
         }
         return;
     }
+    if (editorHasChanges() && !confirm('Are you sure you want to submit these changes to the Consolidated Manager?')) {
+        return;
+    }
     // Save and go straight to Consolidated Manager — no PDF popup
     finalizeSubmitToConsolidated(null);
     showToast('✅', `Submitted: ${editorItem.sku_no} — use Export to PDF on the card`);
@@ -1110,6 +1165,8 @@ function finalizeSubmitToConsolidated(driveRef) {
     }
     editingIdx = null;
     editorItem = createBlankItem((currentData.main_items.length + 1).toString());
+    editorSnapshot = JSON.stringify(editorItem);
+    updateEditTabVisibility();
     renderEditorForm();
     updateConsolidatedBadge();
     triggerAutoSave();
@@ -1251,7 +1308,8 @@ function duplicateSelected() {
 
 function editItem(idx) {
     initEditorForm(currentData.main_items[idx], idx);
-    switchSheet('sheet1');
+    updateEditTabVisibility();
+    switchSheet('edit');
 }
 
 // EDIT / DELETE
@@ -1461,7 +1519,7 @@ function buildReportHTML(item) {
                             <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Length (L)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_l_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_l_in||'—'}</td></tr>
                             <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Width (W)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_w_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_w_in||'—'}</td></tr>
                             <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Height (H)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_h_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_h_in||'—'}</td></tr>
-                            <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.weight_kg||'—'} kg</td></tr>
+                            <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.weight_kg||'—'} kg ${sub.weight_kg?'('+(parseFloat(sub.weight_kg)*2.205).toFixed(2)+' lbs)':''}</td></tr>
                             <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.volume_oz_l||'—'}</td></tr>
                         </table>
                         ${sub.sub_remarks ? `<div style="margin-top:8px;padding:6px 8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:10px;color:#374151"><span style="font-weight:700">Remarks:</span> ${sub.sub_remarks}</div>` : ''}
@@ -1721,7 +1779,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                         <div><label class="text-gray-400 font-bold block mb-0.5">L (CM)</label><input type="text" value="${sub.dim_l_cm||''}" oninput="editorHandleConversion(${sIdx},'l',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
                         <div><label class="text-gray-400 font-bold block mb-0.5">W (CM)</label><input type="text" value="${sub.dim_w_cm||''}" oninput="editorHandleConversion(${sIdx},'w',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
                         <div><label class="text-gray-400 font-bold block mb-0.5">H (CM)</label><input type="text" value="${sub.dim_h_cm||''}" oninput="editorHandleConversion(${sIdx},'h',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
-                        <div><label class="text-gray-400 font-bold block mb-0.5">Weight (KG)</label><input type="text" value="${sub.weight_kg||''}" oninput="${dataRef}.components[${sIdx}].weight_kg=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
+                        <div><label class="text-gray-400 font-bold block mb-0.5">Weight (KG)</label><input type="text" value="${sub.weight_kg||''}" oninput="${dataRef}.components[${sIdx}].weight_kg=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"><p class="text-[9px] text-gray-600 mt-0.5 text-center">${sub.weight_kg?(parseFloat(sub.weight_kg)*2.205).toFixed(2)+' lbs':''}</p></div>
                         <div><label class="text-gray-400 font-bold block mb-0.5">Volume (OZ/L)</label><input type="text" value="${sub.volume_oz_l||''}" oninput="${dataRef}.components[${sIdx}].volume_oz_l=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
                     </div>
                     <div class="grid grid-cols-3 gap-2 pt-1 border-t border-gray-800 text-[10px] text-gray-400 font-mono">
