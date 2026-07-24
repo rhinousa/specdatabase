@@ -151,6 +151,9 @@
                     📊 Consolidated Manager
                     <span id="consolidated-count-badge" class="ml-auto bg-gray-800 text-gray-400 text-[10px] font-bold px-2 py-0.5 rounded-full">0</span>
                 </button>
+                <button onclick="switchSheet('revision')" id="tab-revision" class="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white flex items-center gap-2 transition cursor-pointer mt-1">
+                    🕘 Revision History
+                </button>
             </div>
         </div>
     </div>
@@ -280,6 +283,7 @@
                                 <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">ASIN</th>
                                 <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">UPC</th>
                                 <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">Last Updated</th>
+                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">Last QE Revised</th>
                                 <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">Actions</th>
                             </tr>
                         </thead>
@@ -296,6 +300,51 @@
                     <p class="text-gray-500 text-sm">No entries match your search.</p>
                     <button onclick="document.getElementById('consolidated-search').value='';filterConsolidated('')" class="mt-2 text-xs text-pantone cursor-pointer hover:underline">Clear search</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- REVISION HISTORY -->
+        <div id="revision-view" class="hidden space-y-3">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-lg font-black text-white tracking-tight">Revision History</h1>
+                    <p class="text-xs text-gray-500 mt-0.5">Who edited each item, when, and why — based on Google account. Click a row for the full history.</p>
+                </div>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="bg-gray-800 border-b border-gray-700">
+                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">SKU</th>
+                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">Description</th>
+                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">Last Edited By</th>
+                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">Last Updated</th>
+                                <th class="px-3 py-2.5 text-center text-[9px] font-black text-gray-400 uppercase tracking-widest">Revisions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="revision-grid" class="divide-y divide-gray-800/60"></tbody>
+                    </table>
+                </div>
+                <div id="revision-empty" class="hidden text-center py-16">
+                    <div class="text-4xl mb-3">🕘</div>
+                    <p class="text-gray-500 font-bold text-sm">No revision history yet.</p>
+                    <p class="text-gray-600 text-xs mt-1">History appears here once items are created or edited.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- REVISION HISTORY MODAL -->
+        <div id="revision-modal" onclick="if(event.target===this) closeRevisionModal()" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;padding:24px">
+            <div style="background:#111827;border:1px solid #374151;border-radius:12px;max-width:640px;width:100%;max-height:80vh;overflow-y:auto" class="p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <div id="revision-modal-title" class="text-white font-black text-sm"></div>
+                        <div id="revision-modal-sub" class="text-gray-500 text-[11px] mt-0.5"></div>
+                    </div>
+                    <button onclick="closeRevisionModal()" class="bg-gray-800 text-gray-300 text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer hover:bg-gray-700">✕ Close</button>
+                </div>
+                <div id="revision-modal-body" class="space-y-2"></div>
             </div>
         </div>
 
@@ -388,7 +437,7 @@ function switchSheet(key) {
     // Guard: leaving the editor with unsaved changes should ask for confirmation first
     const editorCurrentlyVisible = !document.getElementById('sheet1-view').classList.contains('hidden');
     if (editorCurrentlyVisible && editorItem && typeof editorHasChanges === 'function' && editorHasChanges()) {
-        const leavingEditor = (key === 'consolidated') || (key === 'sheet1' && editingIdx !== null);
+        const leavingEditor = (key === 'consolidated') || (key === 'revision') || (key === 'sheet1' && editingIdx !== null);
         if (leavingEditor) {
             const ok = confirm('You have unsaved changes on this item.\n\nAre you sure you want to leave without saving? Click Cancel to keep editing.');
             if (!ok) return;
@@ -397,10 +446,13 @@ function switchSheet(key) {
 
     document.getElementById('sheet1-view').classList.add('hidden');
     document.getElementById('consolidated-view').classList.add('hidden');
+    document.getElementById('revision-view').classList.add('hidden');
     const base = "w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white flex items-center gap-2 transition cursor-pointer";
     const active = "w-full text-left px-3 py-2 rounded-lg text-sm font-bold bg-pantone text-black flex items-center gap-2 transition cursor-pointer shadow";
     document.getElementById('tab-sheet1').className = base;
     document.getElementById('tab-consolidated').className = base;
+    const tabRevisionBtn = document.getElementById('tab-revision');
+    if (tabRevisionBtn) tabRevisionBtn.className = base;
     const tabEditBtn = document.getElementById('tab-edit');
     if (tabEditBtn) tabEditBtn.className = base;
 
@@ -421,6 +473,11 @@ function switchSheet(key) {
         if (tabEditBtn) tabEditBtn.className = active;
         wrapper.className = 'p-4 sm:p-8 max-w-5xl mx-auto';
         renderEditorForm();
+    } else if (key === 'revision') {
+        document.getElementById('revision-view').classList.remove('hidden');
+        if (tabRevisionBtn) tabRevisionBtn.className = active;
+        wrapper.className = 'p-4 sm:p-6';
+        buildRevisionView();
     } else {
         document.getElementById('consolidated-view').classList.remove('hidden');
         document.getElementById('tab-consolidated').className = active;
@@ -428,6 +485,72 @@ function switchSheet(key) {
         buildConsolidatedView();
     }
     updateEditTabVisibility();
+}
+
+// ============================================================
+// REVISION HISTORY
+// ============================================================
+function formatRevisionDate(iso) {
+    if (!iso) return '—';
+    try {
+        const d = new Date(iso);
+        return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+        return iso;
+    }
+}
+
+function buildRevisionView() {
+    const tbody = document.getElementById('revision-grid');
+    const empty = document.getElementById('revision-empty');
+    if (!tbody) return;
+    const items = currentData.main_items || [];
+    const withHistory = items
+        .map((item, idx) => ({ item, idx }))
+        .filter(({ item }) => item.revision_history && item.revision_history.length);
+
+    if (!withHistory.length) {
+        tbody.innerHTML = '';
+        if (empty) empty.classList.remove('hidden');
+        return;
+    }
+    if (empty) empty.classList.add('hidden');
+
+    tbody.innerHTML = withHistory.map(({ item, idx }) => {
+        const hist = item.revision_history;
+        const last = hist[hist.length - 1];
+        return `
+        <tr class="hover:bg-gray-800/30 transition cursor-pointer" onclick="openRevisionModal(${idx})">
+            <td class="px-3 py-2"><div class="text-[11px] text-white font-mono font-bold">${item.sku_no || '—'}</div></td>
+            <td class="px-3 py-2"><div class="text-[11px] text-white font-medium truncate" title="${item.description || ''}">${item.description || '—'}</div></td>
+            <td class="px-3 py-2"><div class="text-[11px] text-gray-300">${last.editor || 'Unknown user'}</div></td>
+            <td class="px-3 py-2"><div class="text-[11px] text-gray-400 whitespace-nowrap">${formatRevisionDate(last.date)}</div></td>
+            <td class="px-3 py-2 text-center"><span class="bg-pantone/10 text-pantone text-[10px] font-black px-2 py-0.5 rounded-full border border-pantone/20">${hist.length}</span></td>
+        </tr>`;
+    }).join('');
+}
+
+function openRevisionModal(idx) {
+    const item = currentData.main_items[idx];
+    if (!item) return;
+    const hist = (item.revision_history || []).slice().reverse(); // most recent first
+    document.getElementById('revision-modal-title').textContent = `${item.sku_no || 'Item'} — ${item.description || ''}`;
+    document.getElementById('revision-modal-sub').textContent = `${hist.length} revision${hist.length === 1 ? '' : 's'} on record`;
+    document.getElementById('revision-modal-body').innerHTML = hist.map(r => `
+        <div style="border:1px solid #374151;border-radius:8px;padding:10px 12px;background:#0b0f16">
+            <div class="flex items-center justify-between">
+                <span class="text-pantone text-[11px] font-black">Revision ${r.rev}</span>
+                <span class="text-gray-500 text-[10px]">${formatRevisionDate(r.date)}</span>
+            </div>
+            <div class="text-gray-300 text-[11px] mt-1"><span class="text-gray-500 font-bold">Edited by:</span> ${r.editor || 'Unknown user'}</div>
+            <div class="text-gray-300 text-[11px] mt-1"><span class="text-gray-500 font-bold">Reason:</span> ${r.reason || '—'}</div>
+        </div>
+    `).join('');
+    document.getElementById('revision-modal').style.display = 'flex';
+}
+
+function closeRevisionModal() {
+    document.getElementById('revision-modal').style.display = 'none';
 }
 
 // ============================================================
@@ -453,18 +576,13 @@ function exitEditor() {
         switchSheet('consolidated');
         return;
     }
-    // Changes detected — ask user what to do
-    const choice = confirm('You have unsaved changes.\n\nClick OK to submit and save to Consolidated Manager.\nClick Cancel to discard changes and exit.');
+    // Changes detected — ask whether to submit before leaving
+    const choice = confirm('You have unsaved changes.\n\nClick OK to submit these changes now.\nClick Cancel to go back and keep editing.');
     if (choice) {
-        // Submit first then switch
-        submitToConsolidated();
-    } else {
-        // Discard and exit
-        editingIdx = null;
-        editorItem = createBlankItem((currentData.main_items.length + 1).toString());
-        editorSnapshot = JSON.stringify(editorItem);
-        switchSheet('consolidated');
+        // Exit's own confirmation already covers "are you sure" — skip the extra one in submitToConsolidated
+        submitToConsolidated(true);
     }
+    // Cancel: do nothing — stay right where you are in the editor
 }
 
 function clearEditorForm() {
@@ -852,7 +970,7 @@ const GDRIVE_FOLDER_ID = '19XXe0wgjApP-UXUVSW9sGYBGmKbbDcJF';
 const GDRIVE_IMAGES_FOLDER_ID = '1F7wlpwI4Jv47UXkhQJnKfibGOgikYYEG'; // Rhino USA Spec Images
 const GDRIVE_FILE_NAME = 'RHINO-SpecSuite-Data.json';
 const GDRIVE_CLIENT_ID = '494765023704-qb7uj3tg4l37f8a5ien6g81s7pgfksti.apps.googleusercontent.com'; // ← IT will provide this
-const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets.readonly';
+const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
 let gdriveEnabled = false;
 let gdriveToken = null;
 let gdriveFileId = null;
@@ -880,7 +998,7 @@ async function silentReconnectGDrive() {
                 client_id: GDRIVE_CLIENT_ID,
                 scope: GDRIVE_SCOPES,
                 prompt: '',
-                callback: (resp) => {
+                callback: async (resp) => {
                     if (resp.access_token) {
                         gdriveToken = resp.access_token;
                         gdriveEnabled = true;
@@ -889,6 +1007,12 @@ async function silentReconnectGDrive() {
                         updateDriveButtonState();
                         setStatus('✅ Drive connected', 'text-green-400');
                         console.log('✅ Google Drive auto-reconnected silently');
+                        const profile = await fetchGoogleUserInfo(gdriveToken);
+                        if (profile) {
+                            currentUser = profile;
+                            sessionStorage.setItem(AUTH_KEY, JSON.stringify(currentUser));
+                            updateSidebarUser();
+                        }
                         resolve(true);
                     } else {
                         resolve(false);
@@ -905,6 +1029,27 @@ async function silentReconnectGDrive() {
         console.error('Silent reconnect error:', err);
         return false;
     }
+}
+
+async function fetchGoogleUserInfo(token) {
+    try {
+        const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) return null;
+        const info = await res.json();
+        return { email: info.email || null, name: info.name || null };
+    } catch (e) {
+        console.error('Could not fetch Google user info:', e);
+        return null;
+    }
+}
+
+function currentEditorName() {
+    if (currentUser && (currentUser.name || currentUser.email)) {
+        return currentUser.name || currentUser.email;
+    }
+    return 'Unknown user';
 }
 
 async function connectGDrive() {
@@ -927,6 +1072,9 @@ async function connectGDrive() {
                     setTimeout(() => silentReconnectGDrive(), 55 * 60 * 1000);
                     setStatus('✅ Drive connected', 'text-green-400');
                     updateDriveButtonState();
+                    // Identify the signed-in editor from their Google profile
+                    const profile = await fetchGoogleUserInfo(gdriveToken);
+                    if (profile) currentUser = profile;
                     // Load data and complete login
                     await onGoogleConnected();
                 } else {
@@ -1154,13 +1302,26 @@ function loadFromDrive() {
     input.click();
 }
 
-function finalizeSubmitToConsolidated(driveRef) {
+function finalizeSubmitToConsolidated(driveRef, revisionReason) {
     const itemToSave = JSON.parse(JSON.stringify(editorItem));
     if (driveRef) itemToSave.drive_pdf_url = driveRef;
+    if (!itemToSave.revision_history) itemToSave.revision_history = [];
     if (editingIdx !== null) {
+        itemToSave.revision_history.push({
+            rev: itemToSave.revision_history.length + 1,
+            date: new Date().toISOString(),
+            editor: currentEditorName(),
+            reason: (revisionReason && revisionReason.trim()) || 'No reason provided'
+        });
         currentData.main_items[editingIdx] = itemToSave;
     } else {
         itemToSave.id = (currentData.main_items.length + 1).toString();
+        itemToSave.revision_history.push({
+            rev: 1,
+            date: new Date().toISOString(),
+            editor: currentEditorName(),
+            reason: 'Initial creation'
+        });
         currentData.main_items.push(itemToSave);
     }
     editingIdx = null;
@@ -1265,6 +1426,9 @@ function buildConsolidatedCard(item, idx) {
             <div class="text-[11px] text-gray-400 whitespace-nowrap">${item.date || '—'}</div>
         </td>
         <td class="px-3 py-2">
+            <div class="text-[11px] text-gray-300">${(item.revision_history && item.revision_history.length) ? item.revision_history[item.revision_history.length-1].editor : '—'}</div>
+        </td>
+        <td class="px-3 py-2">
             <div class="flex items-center gap-1 flex-nowrap">
                 <button onclick="exportCardPDF(${idx})" class="bg-pantone text-black text-[9px] font-black px-2 py-1.5 rounded cursor-pointer hover:opacity-90 whitespace-nowrap shrink-0">📄 PDF</button>
                 <button onclick="openPdfReport(${idx})" title="Preview PDF" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold px-2 py-1.5 rounded cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1">👁 Preview PDF</button>
@@ -1317,6 +1481,12 @@ function editItem(idx) {
 function deleteItem(idx) {
     if (!canEdit()) { showToast('⚠️', 'You do not have permission to delete entries.'); return; }
     if (!confirm(`Delete "${currentData.main_items[idx].description || 'this entry'}"?`)) return;
+    const pwd = prompt('Type "deleteme" to confirm this deletion:');
+    if (pwd === null) return;
+    if (pwd.trim() !== 'deleteme') {
+        showToast('⚠️', 'Incorrect confirmation — entry was not deleted.');
+        return;
+    }
     currentData.main_items.splice(idx, 1);
     buildConsolidatedView();
     triggerAutoSave();
