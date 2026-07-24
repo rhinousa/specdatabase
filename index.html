@@ -268,6 +268,7 @@
                             <col style="width:130px">  <!-- ASIN -->
                             <col style="width:130px">  <!-- UPC -->
                             <col style="width:100px">  <!-- Date Updated -->
+                            <col style="width:140px">  <!-- Last QE Revised -->
                             <col style="width:auto">   <!-- Actions — fills rest -->
                         </colgroup>
                         <thead>
@@ -345,6 +346,20 @@
                     <button onclick="closeRevisionModal()" class="bg-gray-800 text-gray-300 text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer hover:bg-gray-700">✕ Close</button>
                 </div>
                 <div id="revision-modal-body" class="space-y-2"></div>
+            </div>
+        </div>
+
+        <!-- GENERIC INPUT MODAL (reason for change / password gates) -->
+        <div id="generic-modal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;padding:24px">
+            <div style="background:#111827;border:1px solid #374151;border-radius:12px;max-width:420px;width:100%" class="p-5">
+                <div id="generic-modal-title" class="text-white font-black text-sm mb-1"></div>
+                <div id="generic-modal-sub" class="text-gray-500 text-[11px] mb-3"></div>
+                <input id="generic-modal-input" type="text" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-white text-sm focus:outline-none focus-pantone">
+                <div id="generic-modal-error" class="hidden text-red-400 text-[11px] mt-2"></div>
+                <div class="flex justify-end gap-2 mt-4">
+                    <button id="generic-modal-cancel" type="button" class="bg-gray-800 text-gray-300 text-xs font-bold px-4 py-2 rounded-lg cursor-pointer hover:bg-gray-700">Cancel</button>
+                    <button id="generic-modal-confirm" type="button" class="bg-pantone text-black text-xs font-black px-4 py-2 rounded-lg cursor-pointer hover:opacity-90">Confirm</button>
+                </div>
             </div>
         </div>
 
@@ -554,6 +569,57 @@ function closeRevisionModal() {
 }
 
 // ============================================================
+// GENERIC INPUT MODAL (used for revision reasons + password gates)
+// ============================================================
+function askModal({ title, sub = '', type = 'text', placeholder = '', confirmText = 'Confirm' }) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('generic-modal');
+        const input = document.getElementById('generic-modal-input');
+        const err = document.getElementById('generic-modal-error');
+        const confirmBtn = document.getElementById('generic-modal-confirm');
+        const cancelBtn = document.getElementById('generic-modal-cancel');
+
+        document.getElementById('generic-modal-title').textContent = title;
+        document.getElementById('generic-modal-sub').textContent = sub;
+        confirmBtn.textContent = confirmText;
+        input.type = type;
+        input.placeholder = placeholder;
+        input.value = '';
+        err.classList.add('hidden');
+        err.textContent = '';
+        modal.style.display = 'flex';
+        setTimeout(() => input.focus(), 50);
+
+        function cleanup(result) {
+            modal.style.display = 'none';
+            confirmBtn.removeEventListener('click', onConfirm);
+            cancelBtn.removeEventListener('click', onCancel);
+            input.removeEventListener('keydown', onKeydown);
+            resolve(result);
+        }
+        function onConfirm() { cleanup(input.value); }
+        function onCancel() { cleanup(null); }
+        function onKeydown(e) {
+            if (e.key === 'Enter') { e.preventDefault(); onConfirm(); }
+            if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+        }
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+        input.addEventListener('keydown', onKeydown);
+    });
+}
+
+async function requirePassword(expected, { title = 'Password Required', sub = 'Enter the password to continue.', confirmText = 'Confirm' } = {}) {
+    const val = await askModal({ title, sub, type: 'password', placeholder: 'Password', confirmText });
+    if (val === null) return false; // cancelled
+    if (val.trim() !== expected) {
+        showToast('⚠️', 'Incorrect password — action cancelled.');
+        return false;
+    }
+    return true;
+}
+
+// ============================================================
 // EDITOR FORM INIT / RENDER
 // ============================================================
 function initEditorForm(existingItem = null, idx = null) {
@@ -572,7 +638,11 @@ function editorHasChanges() {
 
 function exitEditor() {
     if (!editorHasChanges()) {
-        // Nothing changed — go straight to consolidated
+        // Nothing changed — close this editing session entirely and go straight to consolidated
+        editingIdx = null;
+        editorItem = createBlankItem((currentData.main_items.length + 1).toString());
+        editorSnapshot = JSON.stringify(editorItem);
+        updateEditTabVisibility();
         switchSheet('consolidated');
         return;
     }
@@ -933,7 +1003,7 @@ async function autoFillFromSKU(sku) {
     }
 }
 
-function submitToConsolidated() {
+async function submitToConsolidated(skipConfirm = false) {
     if (!editorItem.description.trim()) {
         showToast('⚠️', 'Please enter an Item Description before submitting.');
         document.querySelector('[oninput*=".description"]')?.focus();
@@ -951,11 +1021,30 @@ function submitToConsolidated() {
         }
         return;
     }
-    if (editorHasChanges() && !confirm('Are you sure you want to submit these changes to the Consolidated Manager?')) {
+
+    let revisionReason = null;
+    if (editingIdx !== null) {
+        // Editing an existing item — capture why, for the Revision History tab
+        revisionReason = await askModal({
+            title: 'Reason for Change',
+            sub: "This will be saved to the item's revision history.",
+            type: 'text',
+            placeholder: 'e.g. Updated packaging dimensions',
+            confirmText: 'Save Reason'
+        });
+        if (revisionReason === null) return; // cancelled — stay in the editor
+        revisionReason = revisionReason.trim();
+        if (!revisionReason) {
+            showToast('⚠️', 'A reason is required to save changes to an existing item.');
+            return;
+        }
+    }
+
+    if (!skipConfirm && editorHasChanges() && !confirm('Are you sure you want to submit these changes to the Consolidated Manager?')) {
         return;
     }
     // Save and go straight to Consolidated Manager — no PDF popup
-    finalizeSubmitToConsolidated(null);
+    finalizeSubmitToConsolidated(null, revisionReason);
     showToast('✅', `Submitted: ${editorItem.sku_no} — use Export to PDF on the card`);
 }
 
@@ -1345,10 +1434,13 @@ function saveDriveLink(idx) {
     showToast('🔗', 'Drive link saved!');
 }
 
-function clearDriveLink(idx) {
+async function clearDriveLink(idx) {
+    const ok = await requirePassword('deleteme', { title: 'Confirm Removal', sub: 'Enter the password to remove this Drive link.' });
+    if (!ok) return;
     currentData.main_items[idx].drive_pdf_url = null;
     buildConsolidatedView();
     triggerAutoSave();
+    showToast('🗑', 'Drive link removed.');
 }
 
 function updateConsolidatedBadge() {
@@ -1470,7 +1562,9 @@ function duplicateSelected() {
     showToast('📋', `${checked.length} entry(s) duplicated.`);
 }
 
-function editItem(idx) {
+async function editItem(idx) {
+    const ok = await requirePassword('editme', { title: 'Edit Access', sub: 'Enter the password to edit this item.' });
+    if (!ok) return;
     initEditorForm(currentData.main_items[idx], idx);
     updateEditTabVisibility();
     switchSheet('edit');
@@ -1478,15 +1572,11 @@ function editItem(idx) {
 
 // EDIT / DELETE
 // ============================================================
-function deleteItem(idx) {
+async function deleteItem(idx) {
     if (!canEdit()) { showToast('⚠️', 'You do not have permission to delete entries.'); return; }
     if (!confirm(`Delete "${currentData.main_items[idx].description || 'this entry'}"?`)) return;
-    const pwd = prompt('Type "deleteme" to confirm this deletion:');
-    if (pwd === null) return;
-    if (pwd.trim() !== 'deleteme') {
-        showToast('⚠️', 'Incorrect confirmation — entry was not deleted.');
-        return;
-    }
+    const ok = await requirePassword('deleteme', { title: 'Confirm Deletion', sub: 'Enter the password to delete this entry.' });
+    if (!ok) return;
     currentData.main_items.splice(idx, 1);
     buildConsolidatedView();
     triggerAutoSave();
@@ -1798,7 +1888,20 @@ function buildReportHTML(item) {
                     : `<div style="padding:60px 20px;color:#9ca3af;font-style:italic;font-size:12px">No engineering drawing uploaded yet. Paste a drawing image using the [+] Engineering Blueprint section in the editor.</div>`}
             </td></tr>
         </table>
-    </div>` : ''}`;
+    </div>` : ''}
+
+    <div class="report-page">
+        <div class="page-label">Authorization &amp; Sign-Off</div>
+        <table style="width:100%;border-collapse:collapse">
+            <tr style="background:#111827"><td colspan="2" style="padding:10px;border:1px solid #374151;font-weight:900;font-size:13px;color:#fff;letter-spacing:0.05em">SUPPLIER AUTHORIZATION</td></tr>
+            <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:10px 12px;width:35%">Supplier Name:</td><td style="border:1px solid #9ca3af;padding:10px 12px">&nbsp;</td></tr>
+            <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:10px 12px">Authorize Representative:</td><td style="border:1px solid #9ca3af;padding:10px 12px">&nbsp;</td></tr>
+            <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:10px 12px">Title:</td><td style="border:1px solid #9ca3af;padding:10px 12px">&nbsp;</td></tr>
+            <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:10px 12px">Signature:</td><td style="border:1px solid #9ca3af;padding:28px 12px">&nbsp;</td></tr>
+            <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:10px 12px">Date:</td><td style="border:1px solid #9ca3af;padding:10px 12px">&nbsp;</td></tr>
+            <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:10px 12px">Company Stamp / Seal:</td><td style="border:1px solid #9ca3af;padding:40px 12px">&nbsp;</td></tr>
+        </table>
+    </div>`;
 }
 
 function buildItemFormHTML(item, mIdx, isEditor) {
@@ -1853,7 +1956,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                 </div>`).join('')}
             </div>
             <div><label class="text-gray-400 font-bold block mb-1 text-xs">Photo Remarks / QA Notes</label>
-            <input type="text" value="${item.photo_remarks||''}" oninput="${dataRef}.photo_remarks=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white text-xs focus:outline-none focus-pantone"></div>
+            <textarea oninput="${dataRef}.photo_remarks=this.value" rows="3" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white text-xs focus:outline-none focus-pantone resize-y" style="white-space:pre-wrap;overflow-wrap:break-word">${item.photo_remarks||''}</textarea></div>
         </div>
 
         <!-- Master Carton -->
