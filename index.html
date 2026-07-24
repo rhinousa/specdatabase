@@ -117,7 +117,6 @@
         </div>
         <div class="flex gap-3">
             <button onclick="exportToPDF(currentPdfIdx !== null ? currentData.main_items[currentPdfIdx] : editorItem)" class="bg-pantone text-black text-xs font-black px-4 py-2 rounded-lg cursor-pointer hover:opacity-90">📄 Export to PDF</button>
-            <button onclick="exportToWord(currentPdfIdx !== null ? currentData.main_items[currentPdfIdx] : editorItem)" class="bg-blue-700 text-white text-xs font-black px-4 py-2 rounded-lg cursor-pointer hover:opacity-90">📝 Export to Word</button>
             <button onclick="closePdfPopup()" class="bg-gray-800 text-gray-300 text-xs font-bold px-4 py-2 rounded-lg cursor-pointer hover:bg-gray-700">✕ Close</button>
         </div>
     </div>
@@ -834,62 +833,6 @@ function exportToPDF(item) {
     showToast('⬇️', `Downloaded: ${fname} — open in browser to print as PDF`);
 }
 
-function exportCardPDF(idx) {
-    exportToPDF(currentData.main_items[idx]);
-}
-
-function buildWordDocHTML(item) {
-    const title = item.sku_no ? `${item.sku_no} — ${item.description}` : (item.description || 'Spec Report');
-    return `<!DOCTYPE html>
-<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-<head>
-<meta charset="UTF-8">
-<title>${title}</title>
-<!--[if gte mso 9]>
-<xml>
-<w:WordDocument>
-<w:View>Print</w:View>
-<w:Zoom>100</w:Zoom>
-<w:DoNotOptimizeForBrowser/>
-</w:WordDocument>
-</xml>
-<![endif]-->
-<style>
-body { font-family: Arial, Helvetica, sans-serif; font-size: 11pt; color: #111; }
-table { width: 100%; border-collapse: collapse; margin-bottom: 18pt; }
-td, th { border: 1px solid #9ca3af; padding: 6pt 8pt; vertical-align: top; }
-img { max-width: 100%; }
-.page-label { font-size: 8pt; font-weight: bold; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8pt; }
-.report-page { margin-bottom: 24pt; }
-</style>
-</head>
-<body>
-<div class="report-page">
-    <div class="page-label">Page 1 — Main Specification</div>
-    ${buildReportHTML(item)}
-</div>
-</body>
-</html>`;
-}
-
-function exportToWord(item) {
-    const html = buildWordDocHTML(item);
-    const safeName = (item.sku_no || item.description || 'RHINO-Spec').replace(/[^a-zA-Z0-9\-_]/g, '-');
-    const fname = safeName + '.doc';
-    const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = fname; a.style.display = 'none';
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
-    showToast('⬇️', `Downloaded: ${fname} — opens as an editable Word document`);
-}
-
-function exportCardWord(idx) {
-    exportToWord(currentData.main_items[idx]);
-}
-
 function previewAndExportPDF() {
     if (!editorItem.description.trim()) {
         showToast('⚠️', 'Add an Item Description first.');
@@ -1595,8 +1538,6 @@ function buildConsolidatedCard(item, idx) {
         </td>
         <td class="px-3 py-2">
             <div class="flex items-center gap-1 flex-nowrap">
-                <button onclick="exportCardPDF(${idx})" class="bg-pantone text-black text-[9px] font-black px-2 py-1.5 rounded cursor-pointer hover:opacity-90 whitespace-nowrap shrink-0">📄 PDF</button>
-                <button onclick="exportCardWord(${idx})" class="bg-blue-700 hover:bg-blue-600 text-white text-[9px] font-black px-2 py-1.5 rounded cursor-pointer whitespace-nowrap shrink-0">📝 Word</button>
                 <button onclick="openPdfReport(${idx})" title="Preview PDF" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold px-2 py-1.5 rounded cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1">👁 Preview PDF</button>
                 ${item.drive_pdf_url ? `
                 <a href="${item.drive_pdf_url}" target="_blank" class="bg-blue-900/40 hover:bg-blue-900/70 border border-blue-700/50 text-blue-300 text-[9px] font-bold px-2 py-1.5 rounded no-underline cursor-pointer whitespace-nowrap shrink-0">🔗 Drive</a>
