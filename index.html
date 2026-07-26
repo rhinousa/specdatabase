@@ -97,13 +97,14 @@
 </div>
 
 <!-- IMAGE ZOOM MODAL (Amazon-style magnifier) -->
-<div id="img-zoom-modal" onclick="if(event.target===this) closeZoom()" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.92);align-items:center;justify-content:center">
-    <div id="img-zoom-frame" style="position:relative;max-width:90vw;max-height:90vh;line-height:0" onmousemove="handleZoomMove(event)" onmouseleave="hideZoomLens()" ontouchmove="handleZoomMove(event)" ontouchend="hideZoomLens()">
-        <img id="img-zoom-el" style="max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px;box-shadow:0 25px 60px rgba(0,0,0,0.8);display:block;cursor:crosshair">
-        <div id="zoom-lens" style="display:none;position:absolute;border:2px solid #44D62C;border-radius:50%;background-repeat:no-repeat;pointer-events:none;box-shadow:0 4px 20px rgba(0,0,0,0.6)"></div>
+<div id="img-zoom-modal" onclick="if(event.target===this) closeZoom()" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.92);align-items:center;justify-content:center;gap:20px;padding:24px">
+    <div id="img-zoom-frame" style="position:relative;max-width:44vw;max-height:88vh;line-height:0" onmousemove="handleZoomMove(event)" onmouseleave="hideZoomLens()" ontouchmove="handleZoomMove(event)" ontouchend="hideZoomLens()">
+        <img id="img-zoom-el" style="max-width:44vw;max-height:88vh;object-fit:contain;border-radius:8px;box-shadow:0 25px 60px rgba(0,0,0,0.8);display:block;cursor:crosshair">
+        <div id="zoom-lens" style="display:none;position:absolute;border:2px solid #44D62C;background:rgba(68,214,44,0.15);pointer-events:none"></div>
     </div>
+    <div id="zoom-panel" style="display:none;width:44vw;height:88vh;max-width:760px;background:#0d0f14;border-radius:8px;box-shadow:0 25px 60px rgba(0,0,0,0.8);background-repeat:no-repeat;border:1px solid rgba(255,255,255,0.12)"></div>
     <div style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,0.6);font-size:11px;font-family:Arial,sans-serif">Move your cursor over the photo to zoom in</div>
-    <button onclick="closeZoom()" style="position:absolute;top:16px;right:20px;background:rgba(255,255,255,0.1);border:none;color:#fff;font-size:22px;cursor:pointer;width:36px;height:36px;border-radius:50%">✕</button>
+    <button onclick="closeZoom()" style="position:absolute;top:16px;right:20px;background:rgba(255,255,255,0.1);border:none;color:#fff;font-size:22px;cursor:pointer;width:36px;height:36px;border-radius:50%;z-index:2">✕</button>
 </div>
 
 <!-- TOAST -->
@@ -2391,51 +2392,71 @@ async function deletePhoto(type, key, sIdx=null) {
 function openZoom(src) {
     const modal = document.getElementById('img-zoom-modal');
     const img = document.getElementById('img-zoom-el');
+    const panel = document.getElementById('zoom-panel');
     img.src = src;
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
+    // Show the (empty) zoom panel right away so its size is measurable on the first mousemove
+    panel.style.display = 'block';
+    panel.style.backgroundImage = '';
 }
 
 function closeZoom() {
     document.getElementById('img-zoom-modal').style.display = 'none';
+    document.getElementById('zoom-panel').style.display = 'none';
     document.body.style.overflow = '';
     hideZoomLens();
 }
 
-// Amazon-style magnifier: a lens follows the cursor and shows a zoomed-in
-// crop of the same image, sourced at full resolution (not the on-screen scaled size).
+// Amazon-style magnifier: a rectangular lens follows the cursor over the photo
+// on the left, and the matching zoomed-in crop is shown full-size in the panel
+// on the right — same layout as Amazon's product image zoom.
 const ZOOM_FACTOR = 2.5;
-const ZOOM_LENS_SIZE = 200;
 
 function handleZoomMove(e) {
     const img = document.getElementById('img-zoom-el');
     const lens = document.getElementById('zoom-lens');
+    const panel = document.getElementById('zoom-panel');
     if (!img.src) return;
 
     const point = e.touches ? e.touches[0] : e;
     const rect = img.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+
     const x = point.clientX - rect.left;
     const y = point.clientY - rect.top;
 
     if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
         lens.style.display = 'none';
+        panel.style.backgroundImage = '';
         return;
     }
     if (e.touches) e.preventDefault();
 
-    lens.style.width = ZOOM_LENS_SIZE + 'px';
-    lens.style.height = ZOOM_LENS_SIZE + 'px';
+    // Lens size in the left image is derived from the right panel's size,
+    // so the cropped area always fills the panel edge-to-edge at ZOOM_FACTOR.
+    const lensW = Math.min(panelRect.width / ZOOM_FACTOR, rect.width);
+    const lensH = Math.min(panelRect.height / ZOOM_FACTOR, rect.height);
+
+    const lensX = Math.max(0, Math.min(x - lensW / 2, rect.width - lensW));
+    const lensY = Math.max(0, Math.min(y - lensH / 2, rect.height - lensH));
+
     lens.style.display = 'block';
-    lens.style.left = (x - ZOOM_LENS_SIZE / 2) + 'px';
-    lens.style.top = (y - ZOOM_LENS_SIZE / 2) + 'px';
-    lens.style.backgroundImage = `url('${img.src}')`;
-    lens.style.backgroundSize = (rect.width * ZOOM_FACTOR) + 'px ' + (rect.height * ZOOM_FACTOR) + 'px';
-    lens.style.backgroundPosition = `-${x * ZOOM_FACTOR - ZOOM_LENS_SIZE / 2}px -${y * ZOOM_FACTOR - ZOOM_LENS_SIZE / 2}px`;
+    lens.style.width = lensW + 'px';
+    lens.style.height = lensH + 'px';
+    lens.style.left = lensX + 'px';
+    lens.style.top = lensY + 'px';
+
+    panel.style.backgroundImage = `url('${img.src}')`;
+    panel.style.backgroundSize = (rect.width * ZOOM_FACTOR) + 'px ' + (rect.height * ZOOM_FACTOR) + 'px';
+    panel.style.backgroundPosition = `-${lensX * ZOOM_FACTOR}px -${lensY * ZOOM_FACTOR}px`;
 }
 
 function hideZoomLens() {
     const lens = document.getElementById('zoom-lens');
+    const panel = document.getElementById('zoom-panel');
     if (lens) lens.style.display = 'none';
+    if (panel) panel.style.backgroundImage = '';
 }
 
 function makePreviewImagesZoomable() {
