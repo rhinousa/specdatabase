@@ -1943,6 +1943,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                         oninput="${dataRef}.sku_no=this.value; skuLookupDebounced(this.value)"
                         class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone">
                     <p class="text-[9px] text-gray-600 mt-1">Auto-fills from Fulfil & Google Sheet</p>
+                    <p id="sku-lookup-status" class="hidden text-[10px] font-bold mt-1"></p>
                 </div>
                 <!-- Description second, wider -->
                 <div class="md:col-span-2">
