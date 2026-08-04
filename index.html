@@ -1408,8 +1408,17 @@ function loadFromDrive() {
     input.click();
 }
 
+function formatDateMMDDYYYY(d) {
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${mm}/${dd}/${yyyy}`;
+}
+
 function finalizeSubmitToConsolidated(driveRef, revisionReason) {
     const itemToSave = JSON.parse(JSON.stringify(editorItem));
+    // Last Updated Date always reflects the actual submit/revision date
+    itemToSave.date = formatDateMMDDYYYY(new Date());
     if (driveRef) itemToSave.drive_pdf_url = driveRef;
     if (!itemToSave.revision_history) itemToSave.revision_history = [];
     if (editingIdx !== null) {
@@ -1801,7 +1810,7 @@ function buildReportHTML(item) {
                             <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.weight_kg||'—'} kg ${sub.weight_kg?'('+(parseFloat(sub.weight_kg)*2.205).toFixed(2)+' lbs)':''}</td></tr>
                             <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.volume_oz_l||'—'}</td></tr>
                         </table>
-                        ${sub.sub_remarks ? `<div style="margin-top:8px;padding:6px 8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:10px;color:#374151"><span style="font-weight:700">Remarks:</span> ${sub.sub_remarks}</div>` : ''}
+                        ${sub.sub_remarks ? `<div style="margin-top:8px;padding:6px 8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:10px;color:#374151;white-space:normal;word-wrap:break-word;overflow-wrap:break-word;word-break:break-word"><span style="font-weight:700">Remarks:</span> ${sub.sub_remarks}</div>` : ''}
                     </td>
                 </tr>
             `).join('')}
@@ -2068,7 +2077,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                 <!-- Component Remarks -->
                 <div class="text-xs">
                     <label class="text-gray-400 font-bold block mb-1">Component Remarks</label>
-                    <input type="text" value="${sub.sub_remarks||''}" oninput="${dataRef}.components[${sIdx}].sub_remarks=this.value" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone" placeholder="Component specific remarks...">
+                    <textarea oninput="${dataRef}.components[${sIdx}].sub_remarks=this.value" rows="2" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone resize-y" style="white-space:pre-wrap;overflow-wrap:break-word" placeholder="Component specific remarks...">${sub.sub_remarks||''}</textarea>
                 </div>
 
                 <!-- Dimensions -->
