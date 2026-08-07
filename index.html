@@ -1446,6 +1446,7 @@ function finalizeSubmitToConsolidated(driveRef, revisionReason) {
     renderEditorForm();
     updateConsolidatedBadge();
     triggerAutoSave();
+    triggerSheetAutoSync();
     setTimeout(() => switchSheet('consolidated'), 800);
 }
 
@@ -1587,6 +1588,7 @@ function duplicateSelected() {
     buildConsolidatedView();
     updateConsolidatedBadge();
     triggerAutoSave();
+    triggerSheetAutoSync();
     showToast('📋', `${checked.length} entry(s) duplicated.`);
 }
 
@@ -1608,6 +1610,7 @@ async function deleteItem(idx) {
     currentData.main_items.splice(idx, 1);
     buildConsolidatedView();
     triggerAutoSave();
+    triggerSheetAutoSync();
     showToast('🗑', 'Entry deleted.');
 }
 
@@ -2830,6 +2833,7 @@ function triggerPhotoUpload(type, mIdx, key, sIdx = null) {
 // ============================================================
 const CONSOLIDATED_SHEET_ID = '1LHypfCyyLGpLyvzLMzu4UJRDeLS-Y_kpe_g9XDvITbw';
 let consolidatedSheetTabTitleCache = null;
+let sheetSyncDebounceTimer = null;
 
 async function getConsolidatedSheetTabTitle() {
     if (consolidatedSheetTabTitleCache) return consolidatedSheetTabTitleCache;
@@ -2845,6 +2849,58 @@ async function getConsolidatedSheetTabTitle() {
     return consolidatedSheetTabTitleCache;
 }
 
+// Core push — no UI side effects, safe to call from background triggers.
+async function pushDataToGoogleSheet() {
+    if (!gdriveEnabled || !gdriveToken) return;
+    if (!currentData.main_items.length) return; // don't wipe the sheet before data has loaded
+
+    const title = await getConsolidatedSheetTabTitle();
+    const headers = ['ID','SKU No','Priority SKU','Item Description','ASIN','UPC','GTIN','Date',
+        'MC L (cm)','MC W (cm)','MC H (cm)','MC Weight (kg)','MC Qty/Carton','MC Remarks',
+        'GB L (cm)','GB W (cm)','GB H (cm)','GB Weight (kg)','GB Qty/Carton','GB Artwork',
+        'Components Count','Drive PDF Link'];
+
+    const rows = currentData.main_items.map(item => [
+        item.id, item.sku_no, item.priority_sku, item.description,
+        item.asin, item.upc, item.gtin, item.date,
+        item.mc_l, item.mc_w, item.mc_h, item.mc_weight, item.mc_qty, item.mc_remarks,
+        item.gb_l, item.gb_w, item.gb_h, item.gb_weight, item.gb_qty, item.gb_artwork,
+        (item.components||[]).length, item.drive_pdf_url || ''
+    ].map(v => (v === null || v === undefined) ? '' : v));
+
+    const values = [headers, ...rows];
+
+    // Clear the old range first so a shrinking dataset doesn't leave stale rows behind
+    const clearRange = encodeURIComponent(`'${title}'!A1:Z10000`);
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${CONSOLIDATED_SHEET_ID}/values/${clearRange}:clear`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + gdriveToken }
+    });
+
+    const updateRange = encodeURIComponent(`'${title}'!A1`);
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${CONSOLIDATED_SHEET_ID}/values/${updateRange}?valueInputOption=RAW`, {
+        method: 'PUT',
+        headers: { 'Authorization': 'Bearer ' + gdriveToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values })
+    });
+    if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson?.error?.message || `Sheets API error (${res.status})`);
+    }
+}
+
+// Called automatically whenever the consolidated data changes (new entry, revision,
+// duplicate, delete) and once after signing in — keeps the sheet in sync with no
+// button press needed. Debounced so a burst of changes only triggers one API call.
+function triggerSheetAutoSync() {
+    if (!gdriveEnabled || !gdriveToken) return;
+    clearTimeout(sheetSyncDebounceTimer);
+    sheetSyncDebounceTimer = setTimeout(() => {
+        pushDataToGoogleSheet().catch(err => console.error('Auto-sync to Google Sheet failed:', err));
+    }, 2000);
+}
+
+// Manual button — jumps straight to the sheet and forces an immediate sync.
 async function syncToGoogleSheet() {
     if (!currentData.main_items.length) {
         showToast('⚠️', 'No entries to sync.');
@@ -2857,47 +2913,12 @@ async function syncToGoogleSheet() {
 
     const sheetUrl = `https://docs.google.com/spreadsheets/d/${CONSOLIDATED_SHEET_ID}/edit`;
     // Open the sheet right away, synchronously, so the click itself takes the user there —
-    // doing this after the password/network steps below risks the browser's popup blocker.
+    // doing this after the network step below risks the browser's popup blocker.
     const sheetWindow = window.open(sheetUrl, '_blank');
-
-    const ok = await requirePassword('exportme', { title: 'Confirm Export', sub: 'Enter the password to sync data to Google Sheets.' });
-    if (!ok) return;
 
     setStatus('📊 Syncing to Google Sheet…', 'text-blue-400');
     try {
-        const title = await getConsolidatedSheetTabTitle();
-        const headers = ['ID','SKU No','Priority SKU','Item Description','ASIN','UPC','GTIN','Date',
-            'MC L (cm)','MC W (cm)','MC H (cm)','MC Weight (kg)','MC Qty/Carton','MC Remarks',
-            'GB L (cm)','GB W (cm)','GB H (cm)','GB Weight (kg)','GB Qty/Carton','GB Artwork',
-            'Components Count','Drive PDF Link'];
-
-        const rows = currentData.main_items.map(item => [
-            item.id, item.sku_no, item.priority_sku, item.description,
-            item.asin, item.upc, item.gtin, item.date,
-            item.mc_l, item.mc_w, item.mc_h, item.mc_weight, item.mc_qty, item.mc_remarks,
-            item.gb_l, item.gb_w, item.gb_h, item.gb_weight, item.gb_qty, item.gb_artwork,
-            (item.components||[]).length, item.drive_pdf_url || ''
-        ].map(v => (v === null || v === undefined) ? '' : v));
-
-        const values = [headers, ...rows];
-
-        // Clear the old range first so a shrinking dataset doesn't leave stale rows behind
-        const clearRange = encodeURIComponent(`'${title}'!A1:Z10000`);
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${CONSOLIDATED_SHEET_ID}/values/${clearRange}:clear`, {
-            method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + gdriveToken }
-        });
-
-        const updateRange = encodeURIComponent(`'${title}'!A1`);
-        const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${CONSOLIDATED_SHEET_ID}/values/${updateRange}?valueInputOption=RAW`, {
-            method: 'PUT',
-            headers: { 'Authorization': 'Bearer ' + gdriveToken, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ values })
-        });
-        if (!res.ok) {
-            const errJson = await res.json().catch(() => ({}));
-            throw new Error(errJson?.error?.message || `Sheets API error (${res.status})`);
-        }
+        await pushDataToGoogleSheet();
         setStatus('✅ Synced to Google Sheet', 'text-green-400');
         showToast('📊', `Synced ${currentData.main_items.length} item(s) to Google Sheet`);
         // Refresh the already-open tab so it reflects the data we just wrote
@@ -2957,6 +2978,7 @@ async function onGoogleConnected() {
     showToast('👋', `Welcome!`);
     initEditorForm();
     updateConsolidatedBadge();
+    triggerSheetAutoSync();
 }
 
 function updateSidebarUser() {
