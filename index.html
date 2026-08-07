@@ -243,7 +243,7 @@
                         📋 Duplicate Selected
                     </button>
                     <button onclick="syncToGoogleSheet()" class="bg-green-700 hover:bg-green-600 text-white text-xs font-black px-4 py-2 rounded-lg cursor-pointer transition flex items-center gap-1.5">
-                        📊 Sync to Google Sheet
+                        🔗 Google Sheet Link
                     </button>
                     <button onclick="switchSheet('sheet1')" class="bg-pantone/10 border border-pantone/30 text-pantone text-xs font-bold px-4 py-2 rounded-lg cursor-pointer hover:bg-pantone/20 transition">
                         ➕ New Entry
@@ -868,7 +868,7 @@ function openPdfReport(idx) {
 // SKU AUTO-LOOKUP — Live from Google Sheets
 // ============================================================
 const GSHEETS_API_KEY = ''; // Not needed — OAuth token used instead
-const GSHEETS_ID = '1gh3EYD7Sjh-pQ8d6wUMkIeCubmeafLQ4U7aeWH8pC-A';
+const GSHEETS_ID = '1MrcrTQp-Ttp7yhJ0LhsklnQCMQOhg9CUX-r7OLSjUpk';
 const GSHEETS_RANGE = 'Sheet1';
 let sheetCache = null;
 let sheetCacheTime = 0;
@@ -2854,6 +2854,12 @@ async function syncToGoogleSheet() {
         showToast('⚠️', 'Connect Google Drive first — syncing needs your Google account.');
         return;
     }
+
+    const sheetUrl = `https://docs.google.com/spreadsheets/d/${CONSOLIDATED_SHEET_ID}/edit`;
+    // Open the sheet right away, synchronously, so the click itself takes the user there —
+    // doing this after the password/network steps below risks the browser's popup blocker.
+    const sheetWindow = window.open(sheetUrl, '_blank');
+
     const ok = await requirePassword('exportme', { title: 'Confirm Export', sub: 'Enter the password to sync data to Google Sheets.' });
     if (!ok) return;
 
@@ -2893,8 +2899,9 @@ async function syncToGoogleSheet() {
             throw new Error(errJson?.error?.message || `Sheets API error (${res.status})`);
         }
         setStatus('✅ Synced to Google Sheet', 'text-green-400');
-        showToast('📊', `Synced ${currentData.main_items.length} item(s) to Google Sheet`, 'Open Sheet',
-            `https://docs.google.com/spreadsheets/d/${CONSOLIDATED_SHEET_ID}/edit`);
+        showToast('📊', `Synced ${currentData.main_items.length} item(s) to Google Sheet`);
+        // Refresh the already-open tab so it reflects the data we just wrote
+        try { if (sheetWindow && !sheetWindow.closed) sheetWindow.location = sheetUrl; } catch (e) {}
     } catch (err) {
         console.error('Sheet sync error:', err);
         setStatus('❌ Sheet sync failed', 'text-red-400');
