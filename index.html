@@ -1063,6 +1063,7 @@ const STORAGE_KEY = 'rhino_spec_suite_v1';
 const GDRIVE_FOLDER_ID = '19XXe0wgjApP-UXUVSW9sGYBGmKbbDcJF';
 const GDRIVE_IMAGES_FOLDER_ID = '1F7wlpwI4Jv47UXkhQJnKfibGOgikYYEG'; // Rhino USA Spec Images
 const GDRIVE_FILE_NAME = 'RHINO-SpecSuite-Data.json';
+const GDRIVE_FILE_ID = '1L5tkwkB8u3IEVWDvA-1NihkHrnHNCEYl'; // hardcoded — bypasses unreliable files.list search for link-shared users
 const GDRIVE_CLIENT_ID = '494765023704-qb7uj3tg4l37f8a5ien6g81s7pgfksti.apps.googleusercontent.com'; // ← IT will provide this
 const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
 let gdriveEnabled = false;
@@ -1215,8 +1216,17 @@ async function gdriveFetch(url, method = 'GET', body = null, isUpload = false) {
 
 async function findOrCreateDriveFile() {
     if (gdriveFileId) return gdriveFileId;
+    // Use the hardcoded file ID directly — files.list search only surfaces files a user
+    // has explicit membership on, so teammates with "anyone with the link" access were
+    // getting zero search results and silently falling through to an empty database.
+    // Direct-by-ID access works for anyone the link is shared with.
+    if (GDRIVE_FILE_ID) {
+        gdriveFileId = GDRIVE_FILE_ID;
+        console.log('Using hardcoded Drive file ID:', gdriveFileId);
+        return gdriveFileId;
+    }
     try {
-        // Search including shared drives
+        // Legacy fallback: search including shared drives
         const q = encodeURIComponent(`name='${GDRIVE_FILE_NAME}' and '${GDRIVE_FOLDER_ID}' in parents and trashed=false`);
         const results = await gdriveFetch(
             `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true`
@@ -1262,9 +1272,17 @@ async function loadFromDriveFile() {
         const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
             headers: { 'Authorization': 'Bearer ' + gdriveToken }
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+            console.error('Drive load failed:', res.status, await res.text().catch(()=>''));
+            setStatus('❌ Could not load Drive data (status ' + res.status + ')', 'text-red-400');
+            return null;
+        }
         return await res.json();
-    } catch(err) { console.error('Drive load error:', err); return null; }
+    } catch(err) {
+        console.error('Drive load error:', err);
+        setStatus('❌ Drive load error: ' + err.message, 'text-red-400');
+        return null;
+    }
 }
 
 
