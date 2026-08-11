@@ -1009,6 +1009,8 @@ async function autoFillFromSKU(sku) {
 }
 
 async function submitToConsolidated(skipConfirm = false) {
+    const ok = await requirePassword('submitme', { title: 'Confirm Submission', sub: 'Enter the password to submit this item to the Consolidated Manager.' });
+    if (!ok) return;
     if (!editorItem.description.trim()) {
         showToast('⚠️', 'Please enter an Item Description before submitting.');
         document.querySelector('[oninput*=".description"]')?.focus();
@@ -2996,6 +2998,7 @@ async function onGoogleConnected() {
     showToast('👋', `Welcome!`);
     initEditorForm();
     updateConsolidatedBadge();
+    switchSheet('consolidated'); // default landing view after login
     triggerSheetAutoSync();
 }
 
