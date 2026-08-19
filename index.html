@@ -456,19 +456,19 @@ function updateEditTabVisibility() {
     }
 }
 
-// While there are unsaved changes in the editor, lock the other sidebar tabs so an
-// accidental click can't navigate away and risk losing the in-progress entry. The
-// "Editing" tab itself stays clickable — it just reloads the same item.
+// The moment you're inside the editor (New Spec Entry or Edit Item), lock the other
+// sidebar tabs — regardless of whether changes have been typed yet. The only way out
+// is the editor's own Exit/Submit buttons. This is a hard lock, not tied to
+// editorHasChanges(), so there's no window where a stray click can slip through.
 function applyEditingNavLock() {
     const sheet1View = document.getElementById('sheet1-view');
-    const locked = !!(sheet1View && !sheet1View.classList.contains('hidden') && editorItem &&
-        typeof editorHasChanges === 'function' && editorHasChanges());
+    const locked = !!(sheet1View && !sheet1View.classList.contains('hidden'));
     ['tab-sheet1', 'tab-consolidated', 'tab-revision'].forEach(id => {
         const btn = document.getElementById(id);
         if (!btn) return;
         if (locked) {
             btn.classList.add('opacity-40', 'pointer-events-none');
-            btn.title = 'Finish or exit the current edit first';
+            btn.title = 'Exit the current entry first';
         } else {
             btn.classList.remove('opacity-40', 'pointer-events-none');
             btn.title = '';
