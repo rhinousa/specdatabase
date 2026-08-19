@@ -378,6 +378,7 @@ let currentData = { main_items: [], users: [] };   // consolidated items + users
 let editorItem = null;                  // single item being edited in sheet1
 let editingIdx = null;                  // null = new, number = editing existing
 let activePasteTarget = null;
+let recentlyDeletedIds = new Set();     // ids deleted this session — excluded from merge-recovery
 
 const primaryPhotoKeys = [
     { key:'product_photo', label:'Marketing Image' },
@@ -455,6 +456,26 @@ function updateEditTabVisibility() {
     }
 }
 
+// While there are unsaved changes in the editor, lock the other sidebar tabs so an
+// accidental click can't navigate away and risk losing the in-progress entry. The
+// "Editing" tab itself stays clickable — it just reloads the same item.
+function applyEditingNavLock() {
+    const sheet1View = document.getElementById('sheet1-view');
+    const locked = !!(sheet1View && !sheet1View.classList.contains('hidden') && editorItem &&
+        typeof editorHasChanges === 'function' && editorHasChanges());
+    ['tab-sheet1', 'tab-consolidated', 'tab-revision'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        if (locked) {
+            btn.classList.add('opacity-40', 'pointer-events-none');
+            btn.title = 'Finish or exit the current edit first';
+        } else {
+            btn.classList.remove('opacity-40', 'pointer-events-none');
+            btn.title = '';
+        }
+    });
+}
+
 function switchSheet(key) {
     // Guard: leaving the editor with unsaved changes should ask for confirmation first
     const editorCurrentlyVisible = !document.getElementById('sheet1-view').classList.contains('hidden');
@@ -481,7 +502,11 @@ function switchSheet(key) {
     const wrapper = document.getElementById('main-wrapper');
 
     if (key === 'sheet1') {
-        if (!canEdit()) { switchSheet('consolidated'); return; }
+        if (!canEdit()) {
+            showToast('⚠️', 'Your Google Drive connection dropped — reconnect before starting a new entry.');
+            switchSheet('consolidated');
+            return;
+        }
         // "New Spec Entry" always starts a fresh, blank item — it never shows an item being edited
         initEditorForm();
         setEditorHeader(false);
@@ -489,7 +514,12 @@ function switchSheet(key) {
         document.getElementById('tab-sheet1').className = active;
         wrapper.className = 'p-4 sm:p-8 max-w-5xl mx-auto';
     } else if (key === 'edit') {
-        if (!canEdit() || editingIdx === null) { switchSheet('consolidated'); return; }
+        if (!canEdit()) {
+            showToast('⚠️', 'Your Google Drive connection dropped — reconnect, then click Edit again.');
+            switchSheet('consolidated');
+            return;
+        }
+        if (editingIdx === null) { switchSheet('consolidated'); return; }
         setEditorHeader(true);
         document.getElementById('sheet1-view').classList.remove('hidden');
         if (tabEditBtn) tabEditBtn.className = active;
@@ -507,6 +537,7 @@ function switchSheet(key) {
         buildConsolidatedView();
     }
     updateEditTabVisibility();
+    applyEditingNavLock();
 }
 
 // ============================================================
@@ -1307,11 +1338,47 @@ async function triggerAutoSave() {
     saveDebounceTimer = setTimeout(() => saveData(), 1500);
 }
 
+// Folds any items into `target` that exist in `source` but not in `target`
+// (matched by id), skipping ids in `excludeIds`. Returns how many were added.
+function mergeMissingItemsById(target, source, excludeIds) {
+    if (!Array.isArray(source)) return 0;
+    const targetIds = new Set(target.map(it => String(it.id)));
+    const missing = source.filter(it => !targetIds.has(String(it.id)) && !excludeIds.has(String(it.id)));
+    if (missing.length > 0) target.push(...missing);
+    return missing.length;
+}
+
+// Before overwriting the shared Drive file, pull the latest copy and fold in any
+// items another user has added since this session loaded. Without this, a stale
+// in-memory copy silently erases concurrent additions on the next save — this is
+// what happens when two people are editing at the same time and one session is
+// behind the other.
+async function mergeRemoteAdditionsIntoLocal() {
+    if (!gdriveEnabled || !gdriveToken) return;
+    try {
+        const remote = await loadFromDriveFile();
+        if (!remote || !Array.isArray(remote.main_items)) return;
+        if (!currentData.main_items) currentData.main_items = [];
+        const added = mergeMissingItemsById(currentData.main_items, remote.main_items, recentlyDeletedIds);
+        if (added > 0) console.log(`Merge: recovered ${added} item(s) added by another session before saving.`);
+    } catch (err) {
+        console.error('Pre-save merge check failed:', err);
+    }
+}
+
 async function saveData() {
     setStatus('💾 Saving…', 'text-yellow-400');
     if (gdriveEnabled && gdriveToken) {
+        await mergeRemoteAdditionsIntoLocal();
         const saved = await saveToDrive(currentData);
-        if (saved) { setStatus('✅ Saved to Drive', 'text-green-400'); return; }
+        if (saved) {
+            setStatus('✅ Saved to Drive', 'text-green-400');
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentData)); } catch(e) {}
+            if (typeof buildConsolidatedView === 'function' && !document.getElementById('consolidated-view').classList.contains('hidden')) buildConsolidatedView();
+            updateConsolidatedBadge();
+            return;
+        }
+        showToast('❌', 'Could not save to Drive — this change is only on your device. Do not close or refresh yet.');
     }
     // localStorage only until Drive is connected
     setStatus('📦 Saved locally', 'text-gray-500');
@@ -1627,6 +1694,7 @@ async function deleteItem(idx) {
     if (!confirm(`Delete "${currentData.main_items[idx].description || 'this entry'}"?`)) return;
     const ok = await requirePassword('deleteme', { title: 'Confirm Deletion', sub: 'Enter the password to delete this entry.' });
     if (!ok) return;
+    recentlyDeletedIds.add(String(currentData.main_items[idx].id));
     currentData.main_items.splice(idx, 1);
     buildConsolidatedView();
     triggerAutoSave();
@@ -2979,11 +3047,22 @@ function signInWithGoogle() {
 }
 
 async function onGoogleConnected() {
+    // Snapshot whatever this device had before we overwrite it with Drive's copy —
+    // if a previous save on this device never made it to Drive (failed save, or the
+    // page was closed before the debounce fired), we can recover it below.
+    const localPending = currentData;
+
     // Load Drive JSON to get users list
     const data = await loadFromDriveFile();
     if (data) {
         currentData = data;
         if (!currentData.users) currentData.users = [];
+        if (!currentData.main_items) currentData.main_items = [];
+        const recovered = mergeMissingItemsById(currentData.main_items, localPending && localPending.main_items, recentlyDeletedIds);
+        if (recovered > 0) {
+            showToast('♻️', `Recovered ${recovered} unsynced item(s) from this device — re-saving to Drive.`);
+            triggerAutoSave();
+        }
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentData)); } catch(e) {}
         updateConsolidatedBadge();
     }
@@ -3067,6 +3146,9 @@ async function postLoginInit() {
 
 
 async function init() {
+    // Re-check the nav lock on every keystroke in the editor (delegated — survives re-renders)
+    document.getElementById('sheet1-view')?.addEventListener('input', () => applyEditingNavLock());
+
     // Load from localStorage immediately
     loadFromLocalStorage();
 
