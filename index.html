@@ -998,10 +998,11 @@ async function exportToPDF(item) {
     if (!ok) return;
     document.body.classList.add('printing-report');
     // Chrome's "Save as PDF" dialog suggests document.title as the default filename —
-    // swap it to the item's SKU for the duration of the print, then restore it after.
+    // swap it to "SKU — Item Description" for the duration of the print, then restore it after.
     const originalTitle = document.title;
-    const safeName = (item.sku_no || item.description || 'RHINO-USA-Spec')
-        .toString().trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ');
+    const rawName = (item.sku_no && item.description) ? `${item.sku_no} — ${item.description}`
+        : (item.sku_no || item.description || 'RHINO-USA-Spec');
+    const safeName = rawName.toString().trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ');
     document.title = safeName;
     // Photo links (see wrapPhotoLink) are stored as data-href, not href, so clicking a
     // photo in the live preview doesn't hijack the Amazon-zoom click handler. Promote
