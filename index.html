@@ -221,7 +221,7 @@
             <button onclick="syncFromCloud()" class="text-[10px] text-gray-500 hover:text-pantone cursor-pointer font-bold transition flex items-center gap-1">🔄 Sync</button>
         </div>
         <div id="gdrive-connect-btn" class="hidden">
-            <button onclick="connectGDrive()" class="w-full bg-blue-900/40 hover:bg-blue-800/60 border border-blue-700/50 text-blue-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">
+            <button onclick="connectGDrive('reconnect')" class="w-full bg-blue-900/40 hover:bg-blue-800/60 border border-blue-700/50 text-blue-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">
                 🔗 Connect Google Drive
             </button>
         </div>
@@ -1238,9 +1238,34 @@ async function submitToConsolidated(skipConfirm = false) {
     if (!skipConfirm && editorHasChanges() && !confirm('Are you sure you want to submit these changes to the Consolidated Manager?')) {
         return;
     }
-    // Save and go straight to Consolidated Manager — no PDF popup
+
+    // Check the Drive connection right now, before finalizing — this is the moment it
+    // matters most, since the editor form can hold a lot of unsaved work (photos, BOM rows,
+    // etc.). If the session went stale while this tab sat idle, try a quiet reconnect first
+    // so this submit can go straight to Drive instead of landing local-only.
+    if (!gdriveEnabled || !gdriveToken) {
+        setStatus('🔎 Checking Drive connection…', 'text-blue-400');
+        await silentReconnectGDrive().catch(() => false);
+    }
+
+    // Capture the SKU before finalizing — finalizeSubmitToConsolidated() resets editorItem to
+    // a blank item afterward, so reading editorItem.sku_no after that call would show the
+    // new blank item's (empty) SKU instead of the one that was just submitted.
+    const submittedSku = editorItem.sku_no;
+
+    // Save and go straight to Consolidated Manager — no PDF popup. This always writes to
+    // localStorage immediately (via triggerAutoSave inside finalizeSubmitToConsolidated), so
+    // the submitted item is safe on this device even if the Drive part below can't complete.
     finalizeSubmitToConsolidated(null, revisionReason);
-    showToast('✅', `Submitted: ${editorItem.sku_no} — use Export to PDF on the card`);
+
+    if (gdriveEnabled && gdriveToken) {
+        showToast('✅', `Submitted: ${submittedSku} — use Export to PDF on the card`);
+    } else {
+        // Still not connected after the quiet retry — the item IS saved (on this device),
+        // but flag it clearly and offer the one-click way to get it synced to Drive rather
+        // than leaving it to fail silently.
+        showToastAction('🔑', `Submitted "${submittedSku}" — saved on this device, but Google Drive isn't connected. Sign in to sync it now.`, 'Sign in to Drive', () => connectGDrive('reconnect'));
+    }
 }
 
 // ============================================================
@@ -1337,7 +1362,17 @@ function currentEditorName() {
     return 'Unknown user';
 }
 
-async function connectGDrive() {
+// mode:
+//  'login'     — the actual first-time sign-in from the login screen. Nothing is in
+//                progress yet, so it's safe to load Drive's copy of the data and reset the view.
+//  'reconnect' — the user is already inside the app (possibly mid-edit, with an
+//                in-progress item full of pasted photos that hasn't been submitted yet) and
+//                just needs the Drive token refreshed. This must NEVER call onGoogleConnected()
+//                — that function overwrites currentData wholesale and resets the editor form
+//                (initEditorForm()) and navigates to the Consolidated tab, which would wipe
+//                out exactly the in-progress work the reconnect was trying to protect. This was
+//                the actual cause of "I signed in and my data was gone" reports.
+async function connectGDrive(mode = 'login') {
     if (!GDRIVE_CLIENT_ID) {
         showToast('⏳', 'Waiting for IT to provide Google Drive Client ID.');
         return;
@@ -1360,12 +1395,21 @@ async function connectGDrive() {
                     // Identify the signed-in editor from their Google profile
                     const profile = await fetchGoogleUserInfo(gdriveToken);
                     if (profile) currentUser = profile;
-                    // Load data and complete login
+
+                    if (mode === 'reconnect') {
+                        // Token restored — do NOT touch currentData/editorItem or navigate
+                        // anywhere. Just flush whatever save was waiting on this connection.
+                        showToast('✅', 'Reconnected to Drive — saving your work now…');
+                        await saveData();
+                        return;
+                    }
+                    // Fresh login — safe to load Drive's copy and reset the view.
                     await onGoogleConnected();
                 } else {
                     setStatus('❌ Drive auth failed', 'text-red-400');
                     const btn = document.getElementById('google-signin-btn');
                     if (btn) { btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24"><path fill="#000" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#000" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#000" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#000" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg> Sign in with Google'; btn.disabled = false; }
+                    if (mode === 'reconnect') showToastAction('🔑', 'Sign-in didn\'t complete — your work is still safe on this device. Try again to sync it.', 'Sign in to Drive', () => connectGDrive('reconnect'));
                 }
             }
         });
@@ -1373,6 +1417,7 @@ async function connectGDrive() {
     } catch(err) {
         console.error('Drive connect error:', err);
         setStatus('❌ Drive connection failed', 'text-red-400');
+        if (mode === 'reconnect') showToastAction('🔑', 'Could not reconnect to Drive — your work is still safe on this device. Try again to sync it.', 'Sign in to Drive', () => connectGDrive('reconnect'));
     }
 }
 
@@ -1382,7 +1427,7 @@ function updateDriveButtonState() {
     if (gdriveEnabled) {
         btn.innerHTML = '<span class="text-[9px] text-green-400 font-bold">✅ Google Drive Connected</span>';
     } else if (GDRIVE_CLIENT_ID) {
-        btn.innerHTML = '<button onclick="connectGDrive()" class="w-full bg-blue-900/40 hover:bg-blue-800/60 border border-blue-700/50 text-blue-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">🔗 Connect Google Drive</button>';
+        btn.innerHTML = '<button onclick="connectGDrive(\'reconnect\')" class="w-full bg-blue-900/40 hover:bg-blue-800/60 border border-blue-700/50 text-blue-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">🔗 Connect Google Drive</button>';
     }
 }
 
@@ -1541,13 +1586,15 @@ async function saveData() {
         // saveToDrive failed — if it was a 401 it already reset gdriveEnabled/gdriveToken
         // below via gdriveFetch; either way, the change only exists on this device now.
         setStatus('📦 Saved locally only', 'text-yellow-500');
-        showToastAction('🔑', 'Could not save to Drive — this change is only on this device. Sign in again to sync it.', 'Sign in to Drive', connectGDrive);
+        showToastAction('🔑', 'Could not save to Drive — this change is only on this device. Sign in again to sync it.', 'Sign in to Drive', () => connectGDrive('reconnect'));
         return;
     }
     // Not connected to Drive at all (session expired, never signed in this tab, etc.) —
-    // surface a sign-in action instead of silently leaving the work local-only.
+    // surface a sign-in action instead of silently leaving the work local-only. Always
+    // 'reconnect' mode here: there may be an in-progress editor form (e.g. an item full of
+    // pasted photos) that hasn't been submitted yet, and a full re-login must never touch it.
     setStatus('📦 Saved locally', 'text-gray-500');
-    showToastAction('🔑', 'Google Drive isn\'t connected — this change is only on this device until you sign in.', 'Sign in to Drive', connectGDrive);
+    showToastAction('🔑', 'Google Drive isn\'t connected — this change is only on this device until you sign in.', 'Sign in to Drive', () => connectGDrive('reconnect'));
 }
 
 // ── Load: Drive primary, localStorage fallback ────────────
@@ -2854,7 +2901,7 @@ async function deletePhoto(type, key, sIdx=null) {
     if (!isDriveFile || driveDeleted) {
         showToast('🗑', 'Photo deleted');
     } else if (driveDeleteError === 'not connected') {
-        showToastAction('⚠', 'Removed from this record, but Google Drive isn\'t connected — the file itself is still in Drive. Sign in and delete it there too.', 'Sign in to Drive', connectGDrive);
+        showToastAction('⚠', 'Removed from this record, but Google Drive isn\'t connected — the file itself is still in Drive. Sign in and delete it there too.', 'Sign in to Drive', () => connectGDrive('reconnect'));
     } else if (driveDeleteError && driveDeleteError.includes('404')) {
         // A 404 means Drive says that specific file ID doesn't exist — not a permissions
         // problem. This usually means the record's saved photo link had already gone stale
