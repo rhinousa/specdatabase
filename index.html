@@ -3407,7 +3407,7 @@ function showToast(icon, msg, linkText=null, linkHref=null) {
 
 // Same toast, but the link is a clickable action (e.g. "Sign in to Drive") instead of a
 // URL, and it stays up longer since it's asking the user to make a decision, not just FYI.
-function showToastAction(icon, msg, actionLabel, actionFn, autoHideMs=20000) {
+function showToastAction(icon, msg, actionLabel, actionFn, autoHideMs=45000) {
     const t = document.getElementById('drive-toast');
     document.getElementById('toast-icon').textContent = icon;
     document.getElementById('toast-msg').textContent = msg;
@@ -3563,22 +3563,35 @@ window.onload = init;
 
 // If this tab sat idle/hidden for a long stretch (e.g. left open for a couple of hours),
 // the 55-min background refresh timer can get throttled or cleared by the browser, so the
-// Drive session may have silently expired. Re-check the moment the user comes back to this
-// tab, rather than waiting for them to hit Save and only then discover it's local-only.
+// Drive session may have silently expired. Quietly re-check the moment the user comes back.
+//
+// NOTE: this only refreshes the token in the background — it does NOT show a "session
+// expired" toast on its own. Google's silent (prompt:'') token check can fail spuriously
+// (third-party cookie/storage restrictions, brief network hiccups, rate limiting) even when
+// the session is still perfectly valid, and this handler can fire on every quick tab switch.
+// Surfacing an alarming "sign in again" prompt from that alone was a false positive most of
+// the time. Instead, an actual Drive read/write attempt is the only way to *confirm* the
+// session is really dead (a real 401 from Google) — that's what saveData()/deletePhoto()
+// already check, and that's where the sign-in prompt is shown.
+let lastHiddenAt = null;
 document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'hidden') { lastHiddenAt = Date.now(); return; }
     if (document.visibilityState !== 'visible') return;
     if (!GDRIVE_CLIENT_ID) return;
     if (document.getElementById('login-screen')?.style.display === 'flex') return; // not logged in yet
-    const wasEnabled = gdriveEnabled;
-    const reconnected = await silentReconnectGDrive();
-    if (!reconnected && wasEnabled) {
-        // Was connected before this tab went idle, but the session couldn't be silently restored.
-        gdriveEnabled = false;
-        gdriveToken = null;
-        sessionStorage.removeItem('gdrive_token');
-        updateDriveButtonState();
-        showToastAction('🔑', 'Your Google Drive session expired while this tab was idle. Sign in again to keep saving to Drive.', 'Sign in to Drive', connectGDrive);
-    }
+    // Only bother re-checking after a real idle stretch (5+ minutes hidden), not every quick
+    // alt-tab or app switch — those don't need a token refresh and just add noise/rate-limit risk.
+    if (lastHiddenAt && (Date.now() - lastHiddenAt) < 5 * 60 * 1000) return;
+    try { await silentReconnectGDrive(); } catch(e) { /* handled for real on next actual save */ }
+});
+
+// Real, confirmed network-down detection — distinct from a Drive auth problem. This is the
+// "no internet" case the sign-in prompt shouldn't be blamed for.
+window.addEventListener('offline', () => {
+    showToastAction('📡', 'You appear to be offline. Your changes are being saved on this device and will sync once your connection is back.', 'Retry now', () => saveData(), 45000);
+});
+window.addEventListener('online', () => {
+    if (gdriveEnabled && gdriveToken) { showToast('✅', 'Back online — syncing your changes to Drive…'); saveData(); }
 });
 </script>
 </body>
