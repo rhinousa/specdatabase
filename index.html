@@ -2856,7 +2856,11 @@ async function deletePhoto(type, key, sIdx=null) {
     } else if (driveDeleteError === 'not connected') {
         showToastAction('⚠', 'Removed from this record, but Google Drive isn\'t connected — the file itself is still in Drive. Sign in and delete it there too.', 'Sign in to Drive', connectGDrive);
     } else {
-        showToast('⚠', 'Removed from this record, but deleting the file from Drive failed — it may still be there. You may need to delete it manually in Drive.');
+        // Show the real API error (not a vague generic line) so the actual cause — expired
+        // token (401), no permission (403), file already gone (404), etc. — is visible
+        // instead of guessing. Logged in full to the console either way.
+        console.error('Drive photo delete failed:', driveDeleteError);
+        showToast('⚠', 'Removed from this record, but Drive delete failed: ' + (driveDeleteError || 'unknown error') + ' — the file may still be in Drive.', null, null, 14000);
     }
 }
 
@@ -3105,7 +3109,13 @@ async function uploadPhotoToDrive(blob, filename, oldUrl = null) {
             if (oldId) {
                 try {
                     await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${oldId}?supportsAllDrives=true`, 'DELETE');
-                } catch(e) { console.warn('Could not delete old photo:', e.message); }
+                } catch(e) {
+                    // This previously failed silently (console.warn only), leaving the replaced
+                    // photo orphaned in Drive with no visible trace. Surface it so it's not a
+                    // repeat of the same "photo still in Drive" issue via the replace path.
+                    console.error('Could not delete old photo from Drive:', e.message);
+                    showToast('⚠', 'New photo saved, but the old one it replaced could not be removed from Drive: ' + e.message, null, null, 14000);
+                }
             }
         }
 
@@ -3392,7 +3402,7 @@ async function syncToGoogleSheet() {
     }
 }
 
-function showToast(icon, msg, linkText=null, linkHref=null) {
+function showToast(icon, msg, linkText=null, linkHref=null, autoHideMs=8000) {
     const t = document.getElementById('drive-toast');
     document.getElementById('toast-icon').textContent = icon;
     document.getElementById('toast-msg').textContent = msg;
@@ -3402,7 +3412,7 @@ function showToast(icon, msg, linkText=null, linkHref=null) {
     else { l.classList.add('hidden'); }
     t.classList.add('show');
     clearTimeout(t._hideTimer);
-    t._hideTimer = setTimeout(() => t.classList.remove('show'), 8000);
+    t._hideTimer = setTimeout(() => t.classList.remove('show'), autoHideMs);
 }
 
 // Same toast, but the link is a clickable action (e.g. "Sign in to Drive") instead of a
