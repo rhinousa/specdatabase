@@ -2855,10 +2855,19 @@ async function deletePhoto(type, key, sIdx=null) {
         showToast('🗑', 'Photo deleted');
     } else if (driveDeleteError === 'not connected') {
         showToastAction('⚠', 'Removed from this record, but Google Drive isn\'t connected — the file itself is still in Drive. Sign in and delete it there too.', 'Sign in to Drive', connectGDrive);
+    } else if (driveDeleteError && driveDeleteError.includes('404')) {
+        // A 404 means Drive says that specific file ID doesn't exist — not a permissions
+        // problem. This usually means the record's saved photo link had already gone stale
+        // (e.g. it was updated by another session/device after this one loaded its copy of
+        // the data), so we just deleted a reference to a file that isn't the one you're
+        // actually looking at in Drive. Reloading pulls the current data fresh from Drive so
+        // the link matches what's really there before trying again.
+        console.error('Drive photo delete failed (404 — stale reference):', driveDeleteError);
+        showToastAction('⚠', 'Removed from this record, but that photo\'s saved Drive link was already stale (file not found) — likely out of date from another edit. Reload to get the current data, then try again.', 'Reload page', () => location.reload(), 30000);
     } else {
         // Show the real API error (not a vague generic line) so the actual cause — expired
-        // token (401), no permission (403), file already gone (404), etc. — is visible
-        // instead of guessing. Logged in full to the console either way.
+        // token (401), no permission (403), etc. — is visible instead of guessing. Logged in
+        // full to the console either way.
         console.error('Drive photo delete failed:', driveDeleteError);
         showToast('⚠', 'Removed from this record, but Drive delete failed: ' + (driveDeleteError || 'unknown error') + ' — the file may still be in Drive.', null, null, 14000);
     }
