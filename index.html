@@ -2006,6 +2006,17 @@ function writeReportToIframe(item) {
             display: flex;
             flex-direction: column;
         }
+        /* A report with many pages/photos was doing full layout + paint work for every single
+           page on every scroll frame (each page also carries a blurred box-shadow, which is
+           expensive to repaint), which is what caused the stutter/flicker when scrolling fast.
+           content-visibility:auto tells the browser to skip layout/paint entirely for report
+           pages that are off-screen, and contain-intrinsic-size reserves their approximate
+           height up front so the scrollbar/scroll position doesn't jump as pages skip in and
+           out of view. */
+        #pdf-preview-content .report-page {
+            content-visibility: auto;
+            contain-intrinsic-size: 816px 1100px;
+        }
         /* Table stays its natural, compact height — a dedicated spacer (inserted right
            before the footer banner in the markup) absorbs any leftover space instead, so
            rows never stretch to fill the page. */
@@ -2216,10 +2227,10 @@ function buildReportHTML(item) {
                 </tr>
                 <tr>
                     <td colspan="3" style="padding:12px;border:1px solid #9ca3af;vertical-align:top">
-                        <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px;text-align:center">DETAILS</div>
-                        <table style="width:100%;border-collapse:collapse;font-size:9px">
-                            <tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700;width:35%">Description</td><td style="padding:4px 6px;border:1px solid #d1d5db;word-wrap:break-word;white-space:pre-wrap">${cq.description||'—'}</td></tr>
-                            <tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Performance Criteria</td><td style="padding:4px 6px;border:1px solid #d1d5db;word-wrap:break-word;white-space:pre-wrap">${cq.criteria||'—'}</td></tr>
+                        <div style="font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px;text-align:center">DETAILS</div>
+                        <table style="width:100%;border-collapse:collapse;font-size:12px">
+                            <tr><td style="padding:6px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700;width:35%">Description</td><td style="padding:6px 8px;border:1px solid #d1d5db;word-wrap:break-word;white-space:pre-wrap;line-height:1.4">${cq.description||'—'}</td></tr>
+                            <tr><td style="padding:6px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Performance Criteria</td><td style="padding:6px 8px;border:1px solid #d1d5db;word-wrap:break-word;white-space:pre-wrap;line-height:1.4">${cq.criteria||'—'}</td></tr>
                         </table>
                     </td>
                     <td colspan="3" style="padding:12px;border:1px solid #9ca3af;text-align:center;vertical-align:top">
@@ -2571,23 +2582,38 @@ function buildItemFormHTML(item, mIdx, isEditor) {
     <div class="space-y-6">
         <!-- Optional Sections -->
         <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 gap-2 flex flex-wrap text-xs">
-            <button onclick="editorToggleSection('show_marketing')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-teal-400 cursor-pointer">
-                ${item.show_marketing ? '[−] Hide Marketing Block' : '📢 [+] Marketing & Documentation'}
-            </button>
-            <button onclick="editorToggleSection('show_compliance')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-purple-400 cursor-pointer">
-                ${item.show_compliance ? '[−] Hide Compliance' : '✅ [+] Compliance & Testing'}
-            </button>
-            <button onclick="editorToggleSection('show_ctq')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-red-400 cursor-pointer">
-                ${item.show_ctq ? '[−] Hide CTQ Gates' : '🛡️ [+] CTQ Safety Gates'}
-            </button>
-            <button onclick="editorToggleSection('show_drawing')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-cyan-400 cursor-pointer">
-                ${item.show_drawing ? '[−] Hide Drawing' : '📐 [+] Engineering Blueprint'}
-            </button>
-            <button onclick="editorToggleSection('show_other_components')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-orange-400 cursor-pointer">
-                ${item.show_other_components ? '[−] Hide Other Components' : '🧩 [+] Material Component'}
-            </button>
+            <div class="flex items-center gap-1">
+                <button onclick="editorToggleSection('show_marketing')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-teal-400 cursor-pointer">
+                    ${item.show_marketing ? '[−] Hide Marketing Block' : '[+] Marketing & Documentation'}
+                </button>
+                ${item.show_marketing ? `<button onclick="scrollToSection('section-marketing')" title="Jump to this section" class="px-2 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 text-teal-400 cursor-pointer">⇲</button>` : ''}
+            </div>
+            <div class="flex items-center gap-1">
+                <button onclick="editorToggleSection('show_compliance')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-purple-400 cursor-pointer">
+                    ${item.show_compliance ? '[−] Hide Compliance' : '[+] Compliance & Testing'}
+                </button>
+                ${item.show_compliance ? `<button onclick="scrollToSection('section-compliance')" title="Jump to this section" class="px-2 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 text-purple-400 cursor-pointer">⇲</button>` : ''}
+            </div>
+            <div class="flex items-center gap-1">
+                <button onclick="editorToggleSection('show_ctq')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-red-400 cursor-pointer">
+                    ${item.show_ctq ? '[−] Hide CTQ Gates' : '[+] CTQ Safety Gates'}
+                </button>
+                ${item.show_ctq ? `<button onclick="scrollToSection('section-ctq')" title="Jump to this section" class="px-2 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 text-red-400 cursor-pointer">⇲</button>` : ''}
+            </div>
+            <div class="flex items-center gap-1">
+                <button onclick="editorToggleSection('show_drawing')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-cyan-400 cursor-pointer">
+                    ${item.show_drawing ? '[−] Hide Drawing' : '[+] Engineering Blueprint'}
+                </button>
+                ${item.show_drawing ? `<button onclick="scrollToSection('section-drawing')" title="Jump to this section" class="px-2 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 text-cyan-400 cursor-pointer">⇲</button>` : ''}
+            </div>
+            <div class="flex items-center gap-1">
+                <button onclick="editorToggleSection('show_other_components')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-orange-400 cursor-pointer">
+                    ${item.show_other_components ? '[−] Hide Other Components' : '[+] Material Component'}
+                </button>
+                ${item.show_other_components ? `<button onclick="scrollToSection('section-other-components')" title="Jump to this section" class="px-2 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 text-orange-400 cursor-pointer">⇲</button>` : ''}
+            </div>
             <button onclick="editorToggleSection('show_authorization')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-yellow-400 cursor-pointer">
-                ${item.show_authorization ? '[−] Hide Authorization' : '✍️ [+] Authorization & Sign-Off'}
+                ${item.show_authorization ? '[−] Hide Authorization' : '[+] Authorization & Sign-Off'}
             </button>
         </div>
 
@@ -3148,6 +3174,13 @@ function editorAddPackageContent() {
 }
 function editorDeletePackageContent(pcIdx) { editorItem.package_contents.splice(pcIdx,1); renderEditorForm(); }
 function editorToggleSection(key) { editorItem[key]=!editorItem[key]; renderEditorForm(); }
+// Separate, explicit "jump to this section" trigger — distinct from the [+]/[−] add/hide
+// button, which only toggles the section on or off. This one only appears once a section is
+// already showing, and just scrolls straight to it without changing anything.
+function scrollToSection(sectionId) {
+    const el = document.getElementById(sectionId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 // Same defaultTrue-aware toggle as editorToggleSubParam, but for item-level (not per-component)
 // fields such as Carton Remarks / Artwork Link / Box Remarks, which default to shown so old
 // saved items keep behaving exactly as before this toggle existed.
@@ -3312,6 +3345,11 @@ function makePreviewImagesZoomable() {
         img.style.cursor = 'zoom-in';
         img.title = 'Click to zoom';
         img.onclick = (e) => { e.stopPropagation(); openZoom(img.src); };
+        // Defer decoding of every photo until it's actually about to scroll into view,
+        // instead of every image on every page decoding all at once the moment the preview
+        // opens — that decode work piling up is what caused the stutter on fast scrolling.
+        img.loading = 'lazy';
+        img.decoding = 'async';
     });
 }
 
