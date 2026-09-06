@@ -116,8 +116,14 @@
         @page { size: legal; margin: 0; }
 
         /* PDF report popup */
+        /* backdrop-filter:blur() used to sit on this full-screen overlay. Since the report
+           preview scrolling happens right inside it (#pdf-popup-inner), the GPU had to keep
+           recompositing that blur on every scroll frame across the whole screen — that
+           constant full-screen re-blur, on top of everything else in the report, is what was
+           still causing the glitching even after the per-page/image fixes. Plain rgba() alone
+           gives the same darkened backdrop look for a fraction of the rendering cost. */
         #pdf-popup {
-            position:fixed;inset:0;z-index:9997;background:rgba(0,0,0,0.85);backdrop-filter:blur(6px);
+            position:fixed;inset:0;z-index:9997;background:rgba(0,0,0,0.92);
             display:none;flex-direction:column;
         }
         #pdf-popup.show { display:flex; }
@@ -268,6 +274,17 @@
                 </div>
             </div>
             <div id="editor-form-container"></div>
+
+            <!-- Small floating "home" button — stays put no matter how far you've scrolled
+                 down the editor, and jumps you straight back to whichever optional sections
+                 (Marketing, Compliance, CTQ, Engineering Blueprint, Material Component) are
+                 currently switched on. Lives inside sheet1-view so it only shows up while
+                 you're actually in the editor, not on other screens. -->
+            <div style="position:fixed;bottom:20px;right:20px;z-index:40">
+                <div id="editor-quicknav-menu" class="hidden mb-2 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-1.5 text-xs w-56 space-y-0.5"></div>
+                <button onclick="toggleEditorQuickNav()" title="Jump to a section" class="w-9 h-9 rounded-full bg-pantone text-black shadow-lg cursor-pointer flex items-center justify-center text-base hover:opacity-90">🏠</button>
+            </div>
+
             <!-- Submit bar -->
             <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between gap-4 no-print">
                 <div class="text-xs text-gray-500 space-y-0.5">
@@ -2928,19 +2945,22 @@ function buildItemFormHTML(item, mIdx, isEditor) {
         <div id="section-compliance" class="bg-gray-900 border border-purple-900/40 rounded-xl p-5 space-y-3">
             <div class="flex justify-between items-center flex-wrap gap-2">
                 <div class="text-[11px] font-black text-purple-400 uppercase tracking-widest">Compliance & Testing Parameters</div>
-                <div class="flex items-center gap-2 text-[10px]">
-                    <span class="text-gray-500">Import CSV:</span>
-                    <input type="file" accept=".csv,.txt" onchange="editorImportCSV(event,'compliance')" class="text-gray-500 text-xs file:py-0.5 file:px-2 file:rounded file:border-0 file:bg-purple-950 file:text-purple-300 cursor-pointer">
-                </div>
             </div>
-            <!-- Paste from Google Sheets zone -->
-            <div id="compliance-paste-zone" tabindex="0"
-                onpaste="pasteTableFromSheets(event,'compliance')"
-                onfocus="this.style.borderColor='#a855f7'"
-                onblur="this.style.borderColor='#374151'"
-                style="border:2px dashed #374151;border-radius:8px;padding:10px 14px;cursor:pointer;transition:border-color 0.2s;outline:none"
-                title="Click here then Ctrl+V to paste rows copied from Google Sheets">
-                <span style="font-size:10px;color:#9ca3af">📋 <strong style="color:#a855f7">Click here</strong> then <kbd style="background:#1e293b;padding:1px 5px;border-radius:3px;font-size:10px">Ctrl+V</kbd> to paste rows copied from Google Sheets</span>
+            <!-- Paste/import a table: land it in a reviewable textarea first, nothing is
+                 committed to the rows below until "Import Pasted Rows" is clicked. -->
+            <div class="space-y-2">
+                <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Or Paste/Import a Table (Component/Feature, Standard, Criteria, Requirements)</div>
+                <div class="flex flex-col md:flex-row gap-2 items-stretch">
+                    <textarea id="compliance-paste-textarea" rows="3" placeholder="Paste rows copied from Excel or Google Sheets — one row per line, columns separated by tabs or commas" class="flex-1 bg-gray-950 border border-purple-800/60 focus:border-purple-400 rounded-lg p-2.5 text-xs text-white font-mono resize-y focus:outline-none"></textarea>
+                    <div class="flex md:flex-col gap-2 shrink-0">
+                        <button onclick="editorImportPastedText('compliance')" class="text-[11px] font-bold px-3 py-2 rounded-lg bg-purple-950 text-purple-300 border border-purple-700 hover:bg-purple-900 cursor-pointer whitespace-nowrap">Import Pasted Rows</button>
+                        <label class="text-[11px] font-bold px-3 py-2 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 cursor-pointer text-center whitespace-nowrap">
+                            Upload Excel File
+                            <input type="file" accept=".csv,.txt" onchange="editorImportCSV(event,'compliance')" class="hidden">
+                        </label>
+                    </div>
+                </div>
+                <div class="text-[9px] text-gray-600">Importing replaces the rows below with what's pasted/uploaded.</div>
             </div>
             <div class="overflow-x-auto border border-gray-800 rounded-lg">
                 <table class="w-full text-xs border-collapse">
@@ -2972,19 +2992,22 @@ function buildItemFormHTML(item, mIdx, isEditor) {
         <div id="section-ctq" class="bg-gray-900 border border-red-900/40 rounded-xl p-5 space-y-3">
             <div class="flex justify-between items-center flex-wrap gap-2">
                 <div class="text-[11px] font-black text-red-400 uppercase tracking-widest">CTQ Safety Gate Framework</div>
-                <div class="flex items-center gap-2 text-[10px]">
-                    <span class="text-gray-500">Import CSV:</span>
-                    <input type="file" accept=".csv,.txt" onchange="editorImportCSV(event,'ctq')" class="text-gray-500 text-xs file:py-0.5 file:px-2 file:rounded file:border-0 file:bg-red-950 file:text-red-300 cursor-pointer">
-                </div>
             </div>
-            <!-- Paste from Google Sheets zone -->
-            <div id="ctq-paste-zone" tabindex="0"
-                onpaste="pasteTableFromSheets(event,'ctq')"
-                onfocus="this.style.borderColor='#f87171'"
-                onblur="this.style.borderColor='#374151'"
-                style="border:2px dashed #374151;border-radius:8px;padding:10px 14px;cursor:pointer;transition:border-color 0.2s;outline:none"
-                title="Click here then Ctrl+V to paste rows copied from Google Sheets">
-                <span style="font-size:10px;color:#9ca3af">📋 <strong style="color:#f87171">Click here</strong> then <kbd style="background:#1e293b;padding:1px 5px;border-radius:3px;font-size:10px">Ctrl+V</kbd> to paste rows copied from Google Sheets</span>
+            <!-- Paste/import a table: land it in a reviewable textarea first, nothing is
+                 committed to the rows below until "Import Pasted Rows" is clicked. -->
+            <div class="space-y-2">
+                <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Or Paste/Import a Table (CTQ Factor, Description, Performance Criteria)</div>
+                <div class="flex flex-col md:flex-row gap-2 items-stretch">
+                    <textarea id="ctq-paste-textarea" rows="3" placeholder="Paste rows copied from Excel or Google Sheets — one row per line, columns separated by tabs or commas" class="flex-1 bg-gray-950 border border-red-800/60 focus:border-red-400 rounded-lg p-2.5 text-xs text-white font-mono resize-y focus:outline-none"></textarea>
+                    <div class="flex md:flex-col gap-2 shrink-0">
+                        <button onclick="editorImportPastedText('ctq')" class="text-[11px] font-bold px-3 py-2 rounded-lg bg-red-950 text-red-300 border border-red-700 hover:bg-red-900 cursor-pointer whitespace-nowrap">Import Pasted Rows</button>
+                        <label class="text-[11px] font-bold px-3 py-2 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 cursor-pointer text-center whitespace-nowrap">
+                            Upload Excel File
+                            <input type="file" accept=".csv,.txt" onchange="editorImportCSV(event,'ctq')" class="hidden">
+                        </label>
+                    </div>
+                </div>
+                <div class="text-[9px] text-gray-600">Importing replaces the rows below with what's pasted/uploaded.</div>
             </div>
             <div class="overflow-x-auto border border-gray-800 rounded-lg">
                 <table class="w-full text-xs border-collapse">
@@ -3051,13 +3074,21 @@ function buildItemFormHTML(item, mIdx, isEditor) {
             </div>
 
             <!-- Table -->
-            <div id="other-components-paste-zone" tabindex="0"
-                onpaste="pasteTableFromSheets(event,'other_components')"
-                onfocus="this.style.borderColor='#f97316'"
-                onblur="this.style.borderColor='#374151'"
-                style="border:2px dashed #374151;border-radius:8px;padding:10px 14px;cursor:pointer;transition:border-color 0.2s;outline:none;margin-bottom:8px"
-                title="Click here then Ctrl+V to paste rows copied from Google Sheets">
-                <span style="font-size:10px;color:#9ca3af">📋 <strong style="color:#f97316">Click here</strong> then <kbd style="background:#1e293b;padding:1px 5px;border-radius:3px;font-size:10px">Ctrl+V</kbd> to paste rows from Google Sheets (Component Description | Material)</span>
+            <!-- Paste/import a table: land it in a reviewable textarea first, nothing is
+                 committed to the rows below until "Import Pasted Rows" is clicked. -->
+            <div class="space-y-2">
+                <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Or Paste/Import a Table (Component Description, Material)</div>
+                <div class="flex flex-col md:flex-row gap-2 items-stretch">
+                    <textarea id="other_components-paste-textarea" rows="3" placeholder="Paste rows copied from Excel or Google Sheets — one row per line, columns separated by tabs or commas" class="flex-1 bg-gray-950 border border-orange-800/60 focus:border-orange-400 rounded-lg p-2.5 text-xs text-white font-mono resize-y focus:outline-none"></textarea>
+                    <div class="flex md:flex-col gap-2 shrink-0">
+                        <button onclick="editorImportPastedText('other_components')" class="text-[11px] font-bold px-3 py-2 rounded-lg bg-orange-950 text-orange-300 border border-orange-700 hover:bg-orange-900 cursor-pointer whitespace-nowrap">Import Pasted Rows</button>
+                        <label class="text-[11px] font-bold px-3 py-2 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 cursor-pointer text-center whitespace-nowrap">
+                            Upload Excel File
+                            <input type="file" accept=".csv,.txt" onchange="editorImportCSV(event,'other_components')" class="hidden">
+                        </label>
+                    </div>
+                </div>
+                <div class="text-[9px] text-gray-600">Importing replaces the rows below with what's pasted/uploaded.</div>
             </div>
             <div class="overflow-x-auto border border-gray-800 rounded-lg">
                 <table class="w-full text-xs border-collapse">
@@ -3180,6 +3211,34 @@ function editorToggleSection(key) { editorItem[key]=!editorItem[key]; renderEdit
 function scrollToSection(sectionId) {
     const el = document.getElementById(sectionId);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Small floating "home" button in the editor — lists whichever optional sections are
+// currently switched on and jumps straight to any of them, regardless of scroll position.
+const EDITOR_QUICKNAV_SECTIONS = [
+    { key: 'show_marketing',        id: 'section-marketing',         label: 'Marketing & Documentation', color: 'text-teal-400' },
+    { key: 'show_compliance',       id: 'section-compliance',        label: 'Compliance & Testing',      color: 'text-purple-400' },
+    { key: 'show_ctq',              id: 'section-ctq',               label: 'CTQ Safety Gates',          color: 'text-red-400' },
+    { key: 'show_drawing',          id: 'section-drawing',           label: 'Engineering Blueprint',     color: 'text-cyan-400' },
+    { key: 'show_other_components', id: 'section-other-components',  label: 'Material Component',        color: 'text-orange-400' },
+];
+function toggleEditorQuickNav() {
+    const menu = document.getElementById('editor-quicknav-menu');
+    if (!menu) return;
+    if (menu.classList.contains('hidden')) {
+        renderEditorQuickNavMenu();
+        menu.classList.remove('hidden');
+    } else {
+        menu.classList.add('hidden');
+    }
+}
+function renderEditorQuickNavMenu() {
+    const menu = document.getElementById('editor-quicknav-menu');
+    if (!menu || !editorItem) return;
+    const active = EDITOR_QUICKNAV_SECTIONS.filter(s => editorItem[s.key]);
+    menu.innerHTML = active.length
+        ? active.map(s => `<button onclick="scrollToSection('${s.id}');toggleEditorQuickNav();" class="w-full text-left px-2.5 py-1.5 rounded hover:bg-gray-800 cursor-pointer font-bold ${s.color}">${s.label}</button>`).join('')
+        : `<div class="px-2.5 py-1.5 text-gray-500">No optional sections added yet.</div>`;
 }
 // Same defaultTrue-aware toggle as editorToggleSubParam, but for item-level (not per-component)
 // fields such as Carton Remarks / Artwork Link / Box Remarks, which default to shown so old
@@ -3422,6 +3481,72 @@ function pasteTableFromSheets(event, type) {
     }
 }
 
+// Splits one pasted/typed row into columns. Excel/Sheets copies use tabs, but someone typing
+// or pasting from elsewhere might use commas instead, so fall back to comma-aware (quote-safe)
+// CSV parsing whenever there's no tab in the line.
+function splitPastedRow(line) {
+    return line.includes('\t') ? line.split('\t').map(c => c.trim()) : parseCSVLine(line);
+}
+
+// Replaces the old instant-on-paste import: pasting (or typing) now lands in a visible
+// textarea first, so the user can review or fix it before anything changes. Nothing is
+// committed to the table until "Import Pasted Rows" is clicked, and — same as the CSV/Excel
+// upload path — importing always REPLACES the existing rows in that table rather than
+// appending to them, per the note shown under the textarea.
+function editorImportPastedText(type) {
+    const ta = document.getElementById(`${type}-paste-textarea`);
+    if (!ta) return;
+    const text = ta.value;
+    if (!text || !text.trim()) { showToast('⚠️', 'Paste or type some rows first.'); return; }
+
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    let rows = lines.map(splitPastedRow);
+
+    // Drop an obvious header row (first cell reads like a label, not real data).
+    const firstCell = ((rows[0] && rows[0][0]) || '').trim();
+    if (firstCell && isNaN(firstCell) && !/^\d/.test(firstCell)) rows = rows.slice(1);
+
+    let count = 0;
+    if (type === 'compliance') {
+        editorItem.compliance = [];
+        rows.forEach(cols => {
+            if (!cols[0]) return;
+            editorItem.compliance.push({
+                id: (editorItem.compliance.length + 1).toString(),
+                test: cols[0] || '', standard: cols[1] || '', criteria: cols[2] || '', requirements: cols[3] || ''
+            });
+            count++;
+        });
+    } else if (type === 'ctq') {
+        editorItem.ctq = [];
+        rows.forEach(cols => {
+            if (!cols[0]) return;
+            editorItem.ctq.push({
+                id: (editorItem.ctq.length + 1).toString(),
+                factor: cols[0] || '', description: cols[1] || '', criteria: cols[2] || '', photo: ''
+            });
+            count++;
+        });
+    } else if (type === 'other_components') {
+        editorItem.other_components = [];
+        rows.forEach(cols => {
+            if (!cols[0]) return;
+            const n = editorItem.other_components.length + 1;
+            editorItem.other_components.push({
+                id: n.toString(), item: n.toString(), component_desc: cols[0] || '', material: cols[1] || ''
+            });
+            count++;
+        });
+    }
+
+    if (count > 0) {
+        renderEditorForm();
+        showToast('📋', `${count} row${count > 1 ? 's' : ''} imported`);
+    } else {
+        showToast('⚠️', 'No valid rows found in the pasted text — check the format and try again.');
+    }
+}
+
 
 function parseCSVLine(line) {
     const result = [];
@@ -3471,6 +3596,21 @@ function editorImportCSV(event, type) {
                     requirements: idxReq >= 0      ? cols[idxReq]?.trim()      : cols[3]?.trim() || ''
                 });
             });
+        } else if (type === 'other_components') {
+            const idxDesc = headers.findIndex(h => h.includes('desc') || h.includes('component'));
+            const idxMat  = headers.findIndex(h => h.includes('material'));
+
+            editorItem.other_components = [];
+            lines.slice(1).forEach((line, i) => {
+                const cols = parseCSVLine(line);
+                if (cols.length < 1 || !(cols[0] || cols[1])) return;
+                editorItem.other_components.push({
+                    id: (i+1).toString(),
+                    item: (i+1).toString(),
+                    component_desc: idxDesc >= 0 ? cols[idxDesc]?.trim() : cols[0]?.trim() || '',
+                    material:       idxMat >= 0  ? cols[idxMat]?.trim()  : cols[1]?.trim() || ''
+                });
+            });
         } else {
             const idxFactor = headers.findIndex(h => h.includes('factor') || h.includes('ctq'));
             const idxDesc   = headers.findIndex(h => h.includes('desc') || h.includes('description'));
@@ -3490,7 +3630,10 @@ function editorImportCSV(event, type) {
             });
         }
         renderEditorForm();
-        showToast('📊', `CSV imported — ${type === 'compliance' ? editorItem.compliance.length : editorItem.ctq.length} rows loaded`);
+        const importedCount = type === 'compliance' ? editorItem.compliance.length
+            : type === 'other_components' ? editorItem.other_components.length
+            : editorItem.ctq.length;
+        showToast('📊', `Excel/CSV imported — ${importedCount} rows loaded`);
     };
     reader.readAsText(file);
 }
