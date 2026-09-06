@@ -3493,9 +3493,45 @@ function pasteTableFromSheets(event, type) {
 // Splits one pasted/typed row into columns. Excel/Sheets copies use tabs, but someone typing
 // or pasting from elsewhere might use commas instead, so fall back to comma-aware (quote-safe)
 // CSV parsing whenever there's no tab in the line.
-function splitPastedRow(line) {
-    return line.includes('\t') ? line.split('\t').map(c => c.trim()) : parseCSVLine(line);
+function splitPastedRow(line, useTab) {
+    return useTab ? line.split('\t').map(c => c.trim()) : parseCSVLine(line);
 }
+
+// Google Sheets/Excel's plain-text clipboard copy does NOT wrap multi-line cells in quotes —
+// a cell with a soft line break inside it (very common for a long Description or Criteria
+// value) comes through as a literal, unquoted newline. Naively treating every newline as a row
+// boundary — which is what this app did before — silently chops that row in half: everything
+// after the break becomes a broken, misaligned "row" of its own with only its first column
+// filled in, and every column after it in the ORIGINAL row (Criteria, Requirements, etc.) ends
+// up blank. This groups raw lines back into full rows by only closing a row out once it has
+// accumulated the number of columns the table actually expects (4 for Compliance, 3 for CTQ, 2
+// for Material Component) — anything short of that gets glued onto the last column instead of
+// starting a new row.
+function groupPastedLinesIntoRows(text, expectedCols) {
+    const useTab = text.includes('\t');
+    const rawLines = text.split(/\r?\n/);
+    const rows = [];
+    let current = null;
+    for (const rawLine of rawLines) {
+        const parts = splitPastedRow(rawLine, useTab);
+        if (current === null) {
+            if (!rawLine.trim()) continue; // skip blank lines between rows
+            current = parts;
+        } else {
+            // Row isn't full yet — this line is a continuation of the previous column's
+            // content (a soft line break), not the start of a new row.
+            current[current.length - 1] = `${current[current.length - 1] || ''}\n${parts[0] || ''}`.trim();
+            if (parts.length > 1) current = current.concat(parts.slice(1));
+        }
+        if (current.length >= expectedCols) {
+            rows.push(current);
+            current = null;
+        }
+    }
+    if (current && current.some(c => (c || '').trim())) rows.push(current);
+    return rows;
+}
+const IMPORT_EXPECTED_COLUMNS = { compliance: 4, ctq: 3, other_components: 2 };
 
 // Replaces the old instant-on-paste import: pasting (or typing) now lands in a visible
 // textarea first, so the user can review or fix it before anything changes. Nothing is
@@ -3527,8 +3563,7 @@ function editorImportPastedText(type) {
     const text = ta.value;
     if (!text || !text.trim()) { showToast('⚠️', 'Paste or type some rows first.'); return; }
 
-    const lines = text.split(/\r?\n/).filter(l => l.trim());
-    let rows = lines.map(splitPastedRow);
+    let rows = groupPastedLinesIntoRows(text, IMPORT_EXPECTED_COLUMNS[type] || 1);
 
     // Only drop the first row if it's actually made of column-title-style words — real data
     // rows are left alone even when their first cell happens to be non-numeric text.
@@ -3596,15 +3631,51 @@ function parseCSVLine(line) {
     return result;
 }
 
+// Real exported CSV files quote a multi-line cell per RFC4180 (e.g. a long Requirements value
+// with a soft line break comes wrapped in "double quotes"), so a plain per-line split — like
+// this function used to do — chops that row apart right at the embedded newline. This parses
+// the whole file as one pass so a quoted newline stays inside its field instead of ending the
+// row early and misaligning every column after it.
+function parseCSVText(text) {
+    const rows = [];
+    let row = [];
+    let field = '';
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (inQuotes) {
+            if (ch === '"') {
+                if (text[i + 1] === '"') { field += '"'; i++; }
+                else inQuotes = false;
+            } else {
+                field += ch;
+            }
+        } else if (ch === '"' && field === '') {
+            inQuotes = true;
+        } else if (ch === ',') {
+            row.push(field.trim()); field = '';
+        } else if (ch === '\r') {
+            // ignore — a following \n (if any) closes the row
+        } else if (ch === '\n') {
+            row.push(field.trim()); field = '';
+            rows.push(row); row = [];
+        } else {
+            field += ch;
+        }
+    }
+    if (field !== '' || row.length) { row.push(field.trim()); rows.push(row); }
+    return rows.filter(r => r.some(c => c !== ''));
+}
+
 function editorImportCSV(event, type) {
     const file = event.target.files[0]; if(!file) return;
     const reader = new FileReader();
     reader.onload = function(e) {
-        const lines = e.target.result.split(/\r?\n/).filter(l => l.trim());
-        if (lines.length < 2) { alert('CSV appears empty or invalid.'); return; }
+        const allRows = parseCSVText(e.target.result);
+        if (allRows.length < 2) { alert('CSV appears empty or invalid.'); return; }
 
         // Parse header row to find column indices dynamically
-        const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]/g,''));
+        const headers = allRows[0].map(h => h.toLowerCase().replace(/[^a-z0-9]/g,''));
 
         if (type === 'compliance') {
             const idxTest     = headers.findIndex(h => h.includes('test') || h.includes('component') || h.includes('feature'));
@@ -3613,8 +3684,7 @@ function editorImportCSV(event, type) {
             const idxReq      = headers.findIndex(h => h.includes('requirement'));
 
             editorItem.compliance = [];
-            lines.slice(1).forEach((line, i) => {
-                const cols = parseCSVLine(line);
+            allRows.slice(1).forEach((cols, i) => {
                 if (cols.length < 2) return;
                 editorItem.compliance.push({
                     id: (i+1).toString(),
@@ -3629,8 +3699,7 @@ function editorImportCSV(event, type) {
             const idxMat  = headers.findIndex(h => h.includes('material'));
 
             editorItem.other_components = [];
-            lines.slice(1).forEach((line, i) => {
-                const cols = parseCSVLine(line);
+            allRows.slice(1).forEach((cols, i) => {
                 if (cols.length < 1 || !(cols[0] || cols[1])) return;
                 editorItem.other_components.push({
                     id: (i+1).toString(),
@@ -3645,8 +3714,7 @@ function editorImportCSV(event, type) {
             const idxCrit   = headers.findIndex(h => h.includes('criteria') || h.includes('performance'));
 
             editorItem.ctq = [];
-            lines.slice(1).forEach((line, i) => {
-                const cols = parseCSVLine(line);
+            allRows.slice(1).forEach((cols, i) => {
                 if (cols.length < 2) return;
                 editorItem.ctq.push({
                     id: (i+1).toString(),
