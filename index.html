@@ -2229,9 +2229,9 @@ function buildReportHTML(item) {
         <img src="${REPORT_LETTERHEAD_HEADER}" style="width:calc(100% + 60px);max-width:none;display:block;margin:-20px -30px 14px -30px">
         <table style="width:100%;border-collapse:collapse;border:1px solid #9ca3af;table-layout:fixed">
             <colgroup>
-                <col style="width:11%"><col style="width:18%">
-                <col style="width:8%"><col style="width:14%">
-                <col style="width:16%"><col style="width:33%">
+                <col style="width:13%"><col style="width:23%">
+                <col style="width:8%"><col style="width:13%">
+                <col style="width:14%"><col style="width:29%">
             </colgroup>
 
             <!-- HEADER -->
@@ -2242,19 +2242,19 @@ function buildReportHTML(item) {
             </tr>
 
             <!-- IDENTITY -->
-            <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Item Description:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af;font-size:13px;font-weight:700">${item.description||'—'}</td></tr>
+            <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">Item Description:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af;font-size:13px;font-weight:700">${item.description||'—'}</td></tr>
             <tr>
-                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">SKU:</td>
+                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">SKU:</td>
                 <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.sku_no||'—'}</td>
-                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">UPC:</td>
+                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">UPC:</td>
                 <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.upc||'—'}</td>
-                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">GTIN:</td>
+                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">GTIN:</td>
                 <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.gtin||'—'}</td>
             </tr>
             <tr>
-                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Priority SKU:</td>
+                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">Priority SKU:</td>
                 <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.priority_sku||'—'}</td>
-                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">ASIN:</td>
+                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">ASIN:</td>
                 <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.asin||'—'}</td>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">Last Updated Date:</td>
                 <td style="padding:6px 10px;border:1px solid #9ca3af">${item.date||'—'}</td>
@@ -2265,11 +2265,11 @@ function buildReportHTML(item) {
             <tr><td colspan="6" style="padding:16px;border:1px solid #9ca3af;text-align:center">${photoBox(item.product_photo)}</td></tr>
             <tr style="background:#e5e7eb"><td colspan="6" style="padding:8px;border:1px solid #9ca3af;text-align:center;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#111827">PACKAGE CONTENT</td></tr>
             <tr>
-                <td colspan="3" style="padding:12px;border:1px solid #9ca3af;text-align:center;vertical-align:top">
+                <td colspan="4" style="padding:12px;border:1px solid #9ca3af;text-align:center;vertical-align:top">
                     <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px">PACKAGE CONTENT IMAGE</div>
                     ${photoBox(item.pkg_content_photo)}
                 </td>
-                <td colspan="3" style="padding:12px;border:1px solid #9ca3af;vertical-align:top">
+                <td colspan="2" style="padding:12px;border:1px solid #9ca3af;vertical-align:top">
                     <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px;text-align:center">INCLUSION</div>
                     <table style="width:100%;border-collapse:collapse;font-size:10px">
                         <tr style="background:#f3f4f6;font-weight:700;color:#374151">
