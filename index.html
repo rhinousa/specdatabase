@@ -471,7 +471,7 @@ function createBlankItem(id) {
         instructions_photo:"",
         features:[{ id:"1", text:"", photo:"" }],
         benefits:[{ id:"1", text:"", photo:"" }],
-        components:[{ id:"1", description:"", material:"", color:"", reliability_test:"", component_photo:"", sub_remarks:"", dim_l_cm:"", dim_w_cm:"", dim_h_cm:"", weight_kg:"", volume_oz_l:"", dim_l_in:"", dim_w_in:"", dim_h_in:"", default_measurement_name:"", extra_measurements:[], show_thickness:false, thickness_cm:"", thickness_in:"", show_volume:false, show_circumference:false, circumference_cm:"", circumference_in:"", show_elevation_angle:false, elevation_angle:"" }],
+        components:[{ id:"1", description:"", material:"", color:"", reliability_test:"", component_photo:"", sub_remarks:"", dim_l_cm:"", dim_w_cm:"", dim_h_cm:"", weight_kg:"", volume_oz_l:"", dim_l_in:"", dim_w_in:"", dim_h_in:"", default_measurement_name:"", extra_measurements:[], show_length:true, show_width:true, show_height:true, show_weight:true, show_thickness:false, thickness_cm:"", thickness_in:"", show_volume:false, show_circumference:false, circumference_cm:"", circumference_in:"", show_elevation_angle:false, elevation_angle:"" }],
         compliance:[{ id:"1", test:"", standard:"", criteria:"", requirements:"" }],
         ctq:[{ id:"1", factor:"", description:"", criteria:"", photo:"" }],
         other_components_photo:"",
@@ -2104,11 +2104,11 @@ function buildReportHTML(item) {
                     <td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">CM</td>
                     <td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">INCHES</td>
                 </tr>
-                <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Length (L)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_l_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_l_in||'—'}</td></tr>
-                <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Width (W)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_w_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_w_in||'—'}</td></tr>
-                <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Height (H)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_h_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_h_in||'—'}</td></tr>
+                ${sub.show_length!==false ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Length (L)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_l_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_l_in||'—'}</td></tr>` : ''}
+                ${sub.show_width!==false ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Width (W)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_w_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_w_in||'—'}</td></tr>` : ''}
+                ${sub.show_height!==false ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Height (H)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_h_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_h_in||'—'}</td></tr>` : ''}
                 ${sub.show_thickness ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Thickness</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.thickness_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.thickness_in||'—'}</td></tr>` : ''}
-                <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.weight_kg||'—'} kg ${!isNaN(parseFloat(sub.weight_kg))?'('+(parseFloat(sub.weight_kg)*2.205).toFixed(2)+' lbs)':''}</td></tr>
+                ${sub.show_weight!==false ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.weight_kg||'—'} kg ${!isNaN(parseFloat(sub.weight_kg))?'('+(parseFloat(sub.weight_kg)*2.205).toFixed(2)+' lbs)':''}</td></tr>` : ''}
                 ${sub.show_volume ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.volume_oz_l||'—'}</td></tr>` : ''}
                 ${sub.show_circumference ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Circumference</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.circumference_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.circumference_in||'—'}</td></tr>` : ''}
                 ${sub.show_elevation_angle ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Elevation/Angle</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.elevation_angle||'—'}</td></tr>` : ''}
@@ -2128,11 +2128,11 @@ function buildReportHTML(item) {
             <tr style="background:#f3f4f6;font-weight:700;color:#374151">
                 ${sets.map(() => `<td style="padding:3px 6px;border:1px solid #d1d5db;text-align:center">CM</td><td style="padding:3px 6px;border:1px solid #d1d5db;text-align:center">IN</td>`).join('')}
             </tr>
-            <tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Length (L)</td>${sets.map(s=>cell(s.l_cm)+cell(s.l_in)).join('')}</tr>
-            <tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Width (W)</td>${sets.map(s=>cell(s.w_cm)+cell(s.w_in)).join('')}</tr>
-            <tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Height (H)</td>${sets.map(s=>cell(s.h_cm)+cell(s.h_in)).join('')}</tr>
+            ${sub.show_length!==false ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Length (L)</td>${sets.map(s=>cell(s.l_cm)+cell(s.l_in)).join('')}</tr>` : ''}
+            ${sub.show_width!==false ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Width (W)</td>${sets.map(s=>cell(s.w_cm)+cell(s.w_in)).join('')}</tr>` : ''}
+            ${sub.show_height!==false ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Height (H)</td>${sets.map(s=>cell(s.h_cm)+cell(s.h_in)).join('')}</tr>` : ''}
             ${sub.show_thickness ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Thickness</td>${sets.map(s=>cell(s.thickness_cm)+cell(s.thickness_in)).join('')}</tr>` : ''}
-            <tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.weight_kg||'—'} kg ${!isNaN(parseFloat(s.weight_kg))?'('+(parseFloat(s.weight_kg)*2.205).toFixed(2)+' lbs)':''}</td>`).join('')}</tr>
+            ${sub.show_weight!==false ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.weight_kg||'—'} kg ${!isNaN(parseFloat(s.weight_kg))?'('+(parseFloat(s.weight_kg)*2.205).toFixed(2)+' lbs)':''}</td>`).join('')}</tr>` : ''}
             ${sub.show_volume ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.volume_oz_l||'—'}</td>`).join('')}</tr>` : ''}
             ${sub.show_circumference ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Circumference</td>${sets.map(s=>cell(s.circumference_cm)+cell(s.circumference_in)).join('')}</tr>` : ''}
             ${sub.show_elevation_angle ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Elevation/Angle</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.elevation_angle||'—'}</td>`).join('')}</tr>` : ''}
@@ -2275,17 +2275,17 @@ function buildReportHTML(item) {
                     <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px">PACKAGE CONTENT IMAGE</div>
                     ${photoBox(item.pkg_content_photo)}
                 </td>
-                <td colspan="2" style="padding:12px;border:1px solid #9ca3af;vertical-align:middle">
+                <td colspan="2" style="padding:12px;border:1px solid #9ca3af;vertical-align:top">
                     <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px;text-align:center">INCLUSION</div>
                     <table style="width:100%;border-collapse:collapse;font-size:10px">
                         <tr style="background:#f3f4f6;font-weight:700;color:#374151">
                             <td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center;width:20%">QTY</td>
-                            <td style="padding:5px 8px;border:1px solid #d1d5db">ITEM</td>
+                            <td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">ITEM</td>
                         </tr>
                         ${(item.package_contents && item.package_contents.length > 0) ? item.package_contents.map(pc => `
                         <tr>
                             <td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center;font-weight:700;background:#f9fafb">${pc.qty||'1'}</td>
-                            <td style="padding:5px 8px;border:1px solid #d1d5db">${pc.name||'—'}</td>
+                            <td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${pc.name||'—'}</td>
                         </tr>`).join('') : `<tr><td colspan="2" style="padding:20px;border:1px solid #d1d5db;color:#9ca3af;font-style:italic;text-align:center">No items added yet.</td></tr>`}
                     </table>
                 </td>
@@ -2720,25 +2720,31 @@ function buildItemFormHTML(item, mIdx, isEditor) {
 
                 <!-- Dimensions -->
                 <div class="bg-gray-900 border border-gray-800 p-3 rounded-lg text-xs space-y-2">
-                    <div class="grid grid-cols-4 gap-3">
-                        <div><label class="text-gray-400 font-bold block mb-0.5">L (CM)</label><input type="text" value="${sub.dim_l_cm||''}" oninput="editorHandleConversion(${sIdx},'l',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
-                        <div><label class="text-gray-400 font-bold block mb-0.5">W (CM)</label><input type="text" value="${sub.dim_w_cm||''}" oninput="editorHandleConversion(${sIdx},'w',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
-                        <div><label class="text-gray-400 font-bold block mb-0.5">H (CM)</label><input type="text" value="${sub.dim_h_cm||''}" oninput="editorHandleConversion(${sIdx},'h',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
-                        <div><label class="text-gray-400 font-bold block mb-0.5">Weight (KG)</label><input type="text" value="${sub.weight_kg||''}" oninput="${dataRef}.components[${sIdx}].weight_kg=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"><p class="text-[9px] text-gray-600 mt-0.5 text-center">${!isNaN(parseFloat(sub.weight_kg))?(parseFloat(sub.weight_kg)*2.205).toFixed(2)+' lbs':''}</p></div>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 pt-1 border-t border-gray-800 text-[10px] text-gray-400 font-mono">
-                        <div>L (in): <input type="text" id="in-l-${mIdx}-${sIdx}" value="${sub.dim_l_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>
-                        <div>W (in): <input type="text" id="in-w-${mIdx}-${sIdx}" value="${sub.dim_w_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>
-                        <div>H (in): <input type="text" id="in-h-${mIdx}-${sIdx}" value="${sub.dim_h_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>
-                    </div>
-
-                    <!-- Optional parameters — hidden unless toggled on for this component -->
-                    <div class="flex flex-wrap gap-2 pt-2 border-t border-gray-800">
+                    <!-- All parameters toggle here — Length/Width/Height/Weight are the defaults
+                         (shown unless you hide them); the rest start hidden until you add them. -->
+                    <div class="flex flex-wrap gap-2 pb-2 border-b border-gray-800">
+                        <button onclick="editorToggleSubParam(${sIdx},'show_length',true)" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${sub.show_length!==false?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${sub.show_length!==false?'− Hide':'+ Add'} Length</button>
+                        <button onclick="editorToggleSubParam(${sIdx},'show_width',true)" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${sub.show_width!==false?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${sub.show_width!==false?'− Hide':'+ Add'} Width</button>
+                        <button onclick="editorToggleSubParam(${sIdx},'show_height',true)" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${sub.show_height!==false?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${sub.show_height!==false?'− Hide':'+ Add'} Height</button>
+                        <button onclick="editorToggleSubParam(${sIdx},'show_weight',true)" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${sub.show_weight!==false?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${sub.show_weight!==false?'− Hide':'+ Add'} Weight</button>
                         <button onclick="editorToggleSubParam(${sIdx},'show_thickness')" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${sub.show_thickness?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${sub.show_thickness?'− Hide':'+ Add'} Thickness</button>
                         <button onclick="editorToggleSubParam(${sIdx},'show_volume')" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${sub.show_volume?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${sub.show_volume?'− Hide':'+ Add'} Volume</button>
                         <button onclick="editorToggleSubParam(${sIdx},'show_circumference')" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${sub.show_circumference?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${sub.show_circumference?'− Hide':'+ Add'} Circumference</button>
                         <button onclick="editorToggleSubParam(${sIdx},'show_elevation_angle')" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${sub.show_elevation_angle?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${sub.show_elevation_angle?'− Hide':'+ Add'} Elevation/Angle</button>
                     </div>
+                    ${(sub.show_length!==false || sub.show_width!==false || sub.show_height!==false || sub.show_weight!==false) ? `
+                    <div class="grid grid-cols-4 gap-3">
+                        ${sub.show_length!==false ? `<div><label class="text-gray-400 font-bold block mb-0.5">L (CM)</label><input type="text" value="${sub.dim_l_cm||''}" oninput="editorHandleConversion(${sIdx},'l',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>` : ''}
+                        ${sub.show_width!==false ? `<div><label class="text-gray-400 font-bold block mb-0.5">W (CM)</label><input type="text" value="${sub.dim_w_cm||''}" oninput="editorHandleConversion(${sIdx},'w',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>` : ''}
+                        ${sub.show_height!==false ? `<div><label class="text-gray-400 font-bold block mb-0.5">H (CM)</label><input type="text" value="${sub.dim_h_cm||''}" oninput="editorHandleConversion(${sIdx},'h',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>` : ''}
+                        ${sub.show_weight!==false ? `<div><label class="text-gray-400 font-bold block mb-0.5">Weight (KG)</label><input type="text" value="${sub.weight_kg||''}" oninput="${dataRef}.components[${sIdx}].weight_kg=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"><p class="text-[9px] text-gray-600 mt-0.5 text-center">${!isNaN(parseFloat(sub.weight_kg))?(parseFloat(sub.weight_kg)*2.205).toFixed(2)+' lbs':''}</p></div>` : ''}
+                    </div>
+                    ${(sub.show_length!==false || sub.show_width!==false || sub.show_height!==false) ? `
+                    <div class="grid grid-cols-3 gap-2 pt-1 border-t border-gray-800 text-[10px] text-gray-400 font-mono">
+                        ${sub.show_length!==false ? `<div>L (in): <input type="text" id="in-l-${mIdx}-${sIdx}" value="${sub.dim_l_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>` : ''}
+                        ${sub.show_width!==false ? `<div>W (in): <input type="text" id="in-w-${mIdx}-${sIdx}" value="${sub.dim_w_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>` : ''}
+                        ${sub.show_height!==false ? `<div>H (in): <input type="text" id="in-h-${mIdx}-${sIdx}" value="${sub.dim_h_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>` : ''}
+                    </div>` : ''}` : ''}
                     ${sub.show_thickness ? `
                     <div class="grid grid-cols-2 gap-3 pt-1">
                         <div><label class="text-gray-400 font-bold block mb-0.5">Thickness (CM)</label><input type="text" value="${sub.thickness_cm||''}" oninput="editorHandleSubParamConversion(${sIdx},'thickness',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
@@ -2773,17 +2779,19 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                         <input type="text" value="${ex.name||''}" oninput="${dataRef}.components[${sIdx}].extra_measurements[${exIdx}].name=this.value" placeholder="Name this measurement (e.g. Item2)" class="flex-1 bg-gray-950 rounded p-1.5 text-white font-bold border border-gray-800 focus:outline-none focus-pantone">
                         <button onclick="editorDeleteMeasurement(${sIdx},${exIdx})" class="text-gray-500 hover:text-red-400 cursor-pointer shrink-0 whitespace-nowrap">Remove ✕</button>
                     </div>
+                    ${(sub.show_length!==false || sub.show_width!==false || sub.show_height!==false || sub.show_weight!==false) ? `
                     <div class="grid grid-cols-4 gap-3">
-                        <div><label class="text-gray-400 font-bold block mb-0.5">L (CM)</label><input type="text" value="${ex.dim_l_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'l',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
-                        <div><label class="text-gray-400 font-bold block mb-0.5">W (CM)</label><input type="text" value="${ex.dim_w_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'w',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
-                        <div><label class="text-gray-400 font-bold block mb-0.5">H (CM)</label><input type="text" value="${ex.dim_h_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'h',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
-                        <div><label class="text-gray-400 font-bold block mb-0.5">Weight (KG)</label><input type="text" value="${ex.weight_kg||''}" oninput="${dataRef}.components[${sIdx}].extra_measurements[${exIdx}].weight_kg=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"><p class="text-[9px] text-gray-600 mt-0.5 text-center">${!isNaN(parseFloat(ex.weight_kg))?(parseFloat(ex.weight_kg)*2.205).toFixed(2)+' lbs':''}</p></div>
+                        ${sub.show_length!==false ? `<div><label class="text-gray-400 font-bold block mb-0.5">L (CM)</label><input type="text" value="${ex.dim_l_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'l',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>` : ''}
+                        ${sub.show_width!==false ? `<div><label class="text-gray-400 font-bold block mb-0.5">W (CM)</label><input type="text" value="${ex.dim_w_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'w',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>` : ''}
+                        ${sub.show_height!==false ? `<div><label class="text-gray-400 font-bold block mb-0.5">H (CM)</label><input type="text" value="${ex.dim_h_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'h',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>` : ''}
+                        ${sub.show_weight!==false ? `<div><label class="text-gray-400 font-bold block mb-0.5">Weight (KG)</label><input type="text" value="${ex.weight_kg||''}" oninput="${dataRef}.components[${sIdx}].extra_measurements[${exIdx}].weight_kg=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"><p class="text-[9px] text-gray-600 mt-0.5 text-center">${!isNaN(parseFloat(ex.weight_kg))?(parseFloat(ex.weight_kg)*2.205).toFixed(2)+' lbs':''}</p></div>` : ''}
                     </div>
+                    ${(sub.show_length!==false || sub.show_width!==false || sub.show_height!==false) ? `
                     <div class="grid grid-cols-3 gap-2 pt-1 border-t border-gray-800 text-[10px] text-gray-400 font-mono">
-                        <div>L (in): <input type="text" id="in-l-ex-${sIdx}-${exIdx}" value="${ex.dim_l_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>
-                        <div>W (in): <input type="text" id="in-w-ex-${sIdx}-${exIdx}" value="${ex.dim_w_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>
-                        <div>H (in): <input type="text" id="in-h-ex-${sIdx}-${exIdx}" value="${ex.dim_h_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>
-                    </div>
+                        ${sub.show_length!==false ? `<div>L (in): <input type="text" id="in-l-ex-${sIdx}-${exIdx}" value="${ex.dim_l_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>` : ''}
+                        ${sub.show_width!==false ? `<div>W (in): <input type="text" id="in-w-ex-${sIdx}-${exIdx}" value="${ex.dim_w_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>` : ''}
+                        ${sub.show_height!==false ? `<div>H (in): <input type="text" id="in-h-ex-${sIdx}-${exIdx}" value="${ex.dim_h_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>` : ''}
+                    </div>` : ''}` : ''}
                     ${sub.show_thickness ? `
                     <div class="grid grid-cols-2 gap-3 pt-1 border-t border-gray-800">
                         <div><label class="text-gray-400 font-bold block mb-0.5">Thickness (CM)</label><input type="text" value="${ex.thickness_cm||''}" oninput="editorHandleExtraParamConversion(${sIdx},${exIdx},'thickness',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
@@ -3069,8 +3077,14 @@ function editorHandleExtraConversion(sIdx, exIdx, field, val) {
 // these (Thickness, Volume, Circumference, Elevation/Angle) can be hidden per component when
 // there's no data for that particular part. field is 'thickness' or 'circumference' (the two
 // that need CM->inch conversion, same pattern as L/W/H).
-function editorToggleSubParam(sIdx, key) {
-    editorItem.components[sIdx][key] = !editorItem.components[sIdx][key];
+// defaultTrue: for the "default" params (Length/Width/Height/Weight) an unset value means
+// shown (true) for backward compatibility with components saved before this toggle existed —
+// so the effective current state has to be computed as "!== false", not the raw falsy value,
+// otherwise the first click on an old component would look like a no-op.
+function editorToggleSubParam(sIdx, key, defaultTrue) {
+    const c = editorItem.components[sIdx];
+    const current = defaultTrue ? (c[key] !== false) : !!c[key];
+    c[key] = !current;
     renderEditorForm();
 }
 function editorHandleSubParamConversion(sIdx, field, val) {
@@ -3096,7 +3110,7 @@ function editorAddPackageContent() {
 }
 function editorDeletePackageContent(pcIdx) { editorItem.package_contents.splice(pcIdx,1); renderEditorForm(); }
 function editorToggleSection(key) { editorItem[key]=!editorItem[key]; renderEditorForm(); }
-function editorAddSub() { editorItem.components.push({id:(editorItem.components.length+1).toString(),description:"",material:"",color:"",reliability_test:"",component_photo:"",sub_remarks:"",dim_l_cm:"",dim_w_cm:"",dim_h_cm:"",weight_kg:"",volume_oz_l:"",dim_l_in:"",dim_w_in:"",dim_h_in:"",default_measurement_name:"",extra_measurements:[],show_thickness:false,thickness_cm:"",thickness_in:"",show_volume:false,show_circumference:false,circumference_cm:"",circumference_in:"",show_elevation_angle:false,elevation_angle:""}); renderEditorForm(); }
+function editorAddSub() { editorItem.components.push({id:(editorItem.components.length+1).toString(),description:"",material:"",color:"",reliability_test:"",component_photo:"",sub_remarks:"",dim_l_cm:"",dim_w_cm:"",dim_h_cm:"",weight_kg:"",volume_oz_l:"",dim_l_in:"",dim_w_in:"",dim_h_in:"",default_measurement_name:"",extra_measurements:[],show_length:true,show_width:true,show_height:true,show_weight:true,show_thickness:false,thickness_cm:"",thickness_in:"",show_volume:false,show_circumference:false,circumference_cm:"",circumference_in:"",show_elevation_angle:false,elevation_angle:""}); renderEditorForm(); }
 function editorDeleteSub(sIdx) { editorItem.components.splice(sIdx,1); renderEditorForm(); }
 function editorAddFeature() { editorItem.features.push({id:(editorItem.features.length+1).toString(),text:"",photo:""}); renderEditorForm(); }
 function editorDeleteFeature(fIdx) { editorItem.features.splice(fIdx,1); renderEditorForm(); }
