@@ -277,11 +277,13 @@
 
             <!-- Small floating "home" button — stays put no matter how far you've scrolled
                  down the editor, and jumps you straight back to whichever optional sections
-                 (Marketing, Compliance, CTQ, Engineering Blueprint, Material Component) are
-                 currently switched on. Lives inside sheet1-view so it only shows up while
-                 you're actually in the editor, not on other screens. -->
+                 always-present blocks (Product Identity, Photos, Master Carton, Gift Box,
+                 Component Details) plus whichever optional sections (Marketing, Compliance,
+                 CTQ, Engineering Blueprint, Material Component) are currently switched on.
+                 Lives inside sheet1-view so it only shows up while you're actually in the
+                 editor, not on other screens. -->
             <div style="position:fixed;bottom:20px;right:20px;z-index:40">
-                <div id="editor-quicknav-menu" class="hidden mb-2 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-1.5 text-xs w-56 space-y-0.5"></div>
+                <div id="editor-quicknav-menu" class="hidden mb-2 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-1.5 text-xs w-60 max-h-80 overflow-y-auto space-y-0.5"></div>
                 <button onclick="toggleEditorQuickNav()" title="Jump to a section" class="w-9 h-9 rounded-full bg-pantone text-black shadow-lg cursor-pointer flex items-center justify-center text-base hover:opacity-90">🏠</button>
             </div>
 
@@ -2635,7 +2637,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
         </div>
 
         <!-- Identity -->
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+        <div id="section-identity" class="bg-gray-900 border border-gray-800 rounded-xl p-5">
             <div class="flex items-center justify-between mb-4">
                 <div class="text-[11px] font-black text-gray-400 uppercase tracking-widest">Product Identity</div>
             </div>
@@ -2671,7 +2673,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
         </div>
 
         <!-- Photos -->
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+        <div id="section-photos" class="bg-gray-900 border border-gray-800 rounded-xl p-5">
             <div class="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-3">Multi-Angle Photographic Array</div>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-[10px] mb-4">
                 ${primaryPhotoKeys.map(p=>`
@@ -2700,7 +2702,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
         </div>
 
         <!-- Master Carton -->
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+        <div id="section-master-carton" class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
             <div class="text-[11px] font-black text-yellow-500 uppercase tracking-widest">Outer Master Carton Packaging</div>
             <div class="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
                 <div><label class="text-gray-400 block mb-1 font-bold">L (CM)</label><input type="text" value="${item.mc_l||''}" oninput="${dataRef}.mc_l=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.mc_l ? (parseFloat(item.mc_l)/2.54).toFixed(2)+' inch' : ''}</p></div>
@@ -2730,7 +2732,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
         </div>
 
         <!-- Gift Box -->
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+        <div id="section-gift-box" class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
             <div class="text-[11px] font-black text-blue-400 uppercase tracking-widest">Product Packaging (Gift Box)</div>
             <div class="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
                 <div><label class="text-gray-400 block mb-1 font-bold">L (CM)</label><input type="text" value="${item.gb_l||''}" oninput="${dataRef}.gb_l=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.gb_l?(parseFloat(item.gb_l)/2.54).toFixed(2)+' inch':''}</p></div>
@@ -2763,7 +2765,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
         </div>
 
         <!-- Components -->
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+        <div id="section-components" class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
             <div class="text-[11px] font-black text-gray-400 uppercase tracking-widest">Component Details</div>
             ${(item.components||[]).map((sub,sIdx)=>`
             <div class="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3">
@@ -3213,9 +3215,16 @@ function scrollToSection(sectionId) {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// Small floating "home" button in the editor — lists whichever optional sections are
-// currently switched on and jumps straight to any of them, regardless of scroll position.
+// Small floating "home" button in the editor — lists every section block in the form (the
+// always-present ones like Identity/Photos/Master Carton/Gift Box/Components, plus whichever
+// optional ones are currently switched on) and jumps straight to any of them, regardless of
+// scroll position. `key: null` means "always show this entry" — no show_* flag gates it.
 const EDITOR_QUICKNAV_SECTIONS = [
+    { key: null,                     id: 'section-identity',          label: 'Product Identity',           color: 'text-gray-300' },
+    { key: null,                     id: 'section-photos',            label: 'Multi-Angle Photos',         color: 'text-gray-300' },
+    { key: null,                     id: 'section-master-carton',     label: 'Outer Master Carton',        color: 'text-yellow-500' },
+    { key: null,                     id: 'section-gift-box',          label: 'Product Packaging (Gift Box)', color: 'text-blue-400' },
+    { key: null,                     id: 'section-components',        label: 'Component Details',          color: 'text-gray-300' },
     { key: 'show_marketing',        id: 'section-marketing',         label: 'Marketing & Documentation', color: 'text-teal-400' },
     { key: 'show_compliance',       id: 'section-compliance',        label: 'Compliance & Testing',      color: 'text-purple-400' },
     { key: 'show_ctq',              id: 'section-ctq',               label: 'CTQ Safety Gates',          color: 'text-red-400' },
@@ -3235,10 +3244,10 @@ function toggleEditorQuickNav() {
 function renderEditorQuickNavMenu() {
     const menu = document.getElementById('editor-quicknav-menu');
     if (!menu || !editorItem) return;
-    const active = EDITOR_QUICKNAV_SECTIONS.filter(s => editorItem[s.key]);
+    const active = EDITOR_QUICKNAV_SECTIONS.filter(s => s.key === null || editorItem[s.key]);
     menu.innerHTML = active.length
         ? active.map(s => `<button onclick="scrollToSection('${s.id}');toggleEditorQuickNav();" class="w-full text-left px-2.5 py-1.5 rounded hover:bg-gray-800 cursor-pointer font-bold ${s.color}">${s.label}</button>`).join('')
-        : `<div class="px-2.5 py-1.5 text-gray-500">No optional sections added yet.</div>`;
+        : `<div class="px-2.5 py-1.5 text-gray-500">No sections found.</div>`;
 }
 // Same defaultTrue-aware toggle as editorToggleSubParam, but for item-level (not per-component)
 // fields such as Carton Remarks / Artwork Link / Box Remarks, which default to shown so old
@@ -3493,6 +3502,25 @@ function splitPastedRow(line) {
 // committed to the table until "Import Pasted Rows" is clicked, and — same as the CSV/Excel
 // upload path — importing always REPLACES the existing rows in that table rather than
 // appending to them, per the note shown under the textarea.
+// The old header-row check (`isNaN(firstCell)`) silently threw away the very first pasted
+// data row on nearly every real paste: a real "Test"/"Factor" value is text, not a number, so
+// it always looked like a header and got dropped — which is exactly what was making later
+// columns (Criteria, Requirements, etc.) look empty, since a whole row of real data was gone
+// before it ever reached the table. This replacement only strips a row when its cells actually
+// match known column-title wording (short labels like "Standard" or "Requirements"), not just
+// "isn't a number" — real sentences won't match these almost by construction.
+const IMPORT_HEADER_LABELS = {
+    compliance: new Set(['test', 'component', 'feature', 'component feature testing', 'standard', 'standard reference', 'reference', 'criteria', 'acceptance criteria', 'requirement', 'requirements', 'ref']),
+    ctq: new Set(['factor', 'ctq factor', 'description', 'criteria', 'performance criteria', 'validation photo', 'ref']),
+    other_components: new Set(['item', 'component description', 'component', 'description', 'material'])
+};
+function looksLikeImportHeaderRow(cols, type) {
+    const labels = IMPORT_HEADER_LABELS[type];
+    if (!labels) return false;
+    const nonEmpty = cols.map(c => (c || '').trim()).filter(Boolean);
+    if (!nonEmpty.length) return false;
+    return nonEmpty.every(c => labels.has(c.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()));
+}
 function editorImportPastedText(type) {
     const ta = document.getElementById(`${type}-paste-textarea`);
     if (!ta) return;
@@ -3502,9 +3530,9 @@ function editorImportPastedText(type) {
     const lines = text.split(/\r?\n/).filter(l => l.trim());
     let rows = lines.map(splitPastedRow);
 
-    // Drop an obvious header row (first cell reads like a label, not real data).
-    const firstCell = ((rows[0] && rows[0][0]) || '').trim();
-    if (firstCell && isNaN(firstCell) && !/^\d/.test(firstCell)) rows = rows.slice(1);
+    // Only drop the first row if it's actually made of column-title-style words — real data
+    // rows are left alone even when their first cell happens to be non-numeric text.
+    if (rows.length && looksLikeImportHeaderRow(rows[0], type)) rows = rows.slice(1);
 
     let count = 0;
     if (type === 'compliance') {
