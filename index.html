@@ -3497,31 +3497,74 @@ function splitPastedRow(line, useTab) {
     return useTab ? line.split('\t').map(c => c.trim()) : parseCSVLine(line);
 }
 
-// Google Sheets/Excel's plain-text clipboard copy does NOT wrap multi-line cells in quotes —
-// a cell with a soft line break inside it (very common for a long Description or Criteria
-// value) comes through as a literal, unquoted newline. Naively treating every newline as a row
-// boundary — which is what this app did before — silently chops that row in half: everything
-// after the break becomes a broken, misaligned "row" of its own with only its first column
-// filled in, and every column after it in the ORIGINAL row (Criteria, Requirements, etc.) ends
-// up blank. This groups raw lines back into full rows by only closing a row out once it has
-// accumulated the number of columns the table actually expects (4 for Compliance, 3 for CTQ, 2
-// for Material Component) — anything short of that gets glued onto the last column instead of
-// starting a new row.
+// Whole-blob, quote-aware tokenizer for either delimiter. Some spreadsheet copies DO wrap a
+// multi-line cell in quotes when it contains a real line break — this reads the whole pasted
+// text in one pass so a quoted newline stays inside its own field instead of ending the row
+// early (which used to silently misalign every column after it).
+function tokenizeDelimitedText(text, delimiter) {
+    const rows = [];
+    let row = [];
+    let field = '';
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (inQuotes) {
+            if (ch === '"') {
+                if (text[i + 1] === '"') { field += '"'; i++; }
+                else inQuotes = false;
+            } else {
+                field += ch;
+            }
+        } else if (ch === '"' && field === '') {
+            inQuotes = true;
+        } else if (ch === delimiter) {
+            row.push(field.trim()); field = '';
+        } else if (ch === '\r') {
+            // ignore — a following \n (if any) closes the row
+        } else if (ch === '\n') {
+            row.push(field.trim()); field = '';
+            rows.push(row); row = [];
+        } else {
+            field += ch;
+        }
+    }
+    if (field !== '' || row.length) { row.push(field.trim()); rows.push(row); }
+    return rows;
+}
+
+// Real spreadsheet exports often carry extra blank filler columns between the ones that
+// actually matter (hidden columns, spacer columns the sheet's template reserves) — e.g.
+// Factor, Description, <blank>, Criteria, <blank>, <blank>. If a row has more cells than the
+// table needs, drop the blank ones first so the real values land in their correct slots
+// instead of one of them silently ending up in a column nobody reads.
+function squeezeToExpectedColumns(cols, expectedCols) {
+    if (cols.length <= expectedCols) return cols;
+    const nonBlank = cols.filter(c => (c || '').trim() !== '');
+    return nonBlank.length <= expectedCols ? nonBlank : cols.slice(0, expectedCols);
+}
+
+// Combines both real-world spreadsheet quirks seen in practice: (1) a cell with a genuine line
+// break inside it — whether or not the source quoted it — that would otherwise chop its row in
+// two, and (2) extra blank filler columns interspersed between the real ones. This only closes
+// a row out once it has accumulated the number of columns the table actually expects (4 for
+// Compliance, 3 for CTQ, 2 for Material Component); anything short of that after squeezing out
+// blanks is treated as a continuation of the last column rather than the start of a new row.
 function groupPastedLinesIntoRows(text, expectedCols) {
-    const useTab = text.includes('\t');
-    const rawLines = text.split(/\r?\n/);
+    const delimiter = text.includes('\t') ? '\t' : ',';
+    const rawRows = tokenizeDelimitedText(text, delimiter);
     const rows = [];
     let current = null;
-    for (const rawLine of rawLines) {
-        const parts = splitPastedRow(rawLine, useTab);
+    for (const rawRow of rawRows) {
+        const squeezed = squeezeToExpectedColumns(rawRow, expectedCols);
+        if (!squeezed.some(c => (c || '').trim())) continue; // skip fully blank rows
         if (current === null) {
-            if (!rawLine.trim()) continue; // skip blank lines between rows
-            current = parts;
+            current = squeezed;
         } else {
-            // Row isn't full yet — this line is a continuation of the previous column's
-            // content (a soft line break), not the start of a new row.
-            current[current.length - 1] = `${current[current.length - 1] || ''}\n${parts[0] || ''}`.trim();
-            if (parts.length > 1) current = current.concat(parts.slice(1));
+            // Row isn't full yet — this chunk is a continuation of the previous column's
+            // content (an unquoted soft line break), not the start of a new row.
+            current[current.length - 1] = `${current[current.length - 1] || ''}\n${squeezed[0] || ''}`.trim();
+            if (squeezed.length > 1) current = current.concat(squeezed.slice(1));
+            current = squeezeToExpectedColumns(current, expectedCols);
         }
         if (current.length >= expectedCols) {
             rows.push(current);
