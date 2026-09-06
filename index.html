@@ -697,6 +697,49 @@ function askModal({ title, sub = '', type = 'text', placeholder = '', confirmTex
     });
 }
 
+// Simple Yes/No prompt, built on the same generic modal used for text input — hides the
+// text field and repurposes the two buttons as the two answers. Resolves true/false; there's
+// no third "cancel" outcome since callers of this (revision-reason gating) always proceed
+// with the save either way, they just differ on whether a reason gets recorded.
+function askYesNo({ title, sub = '', yesText = 'Yes', noText = 'No' }) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('generic-modal');
+        const input = document.getElementById('generic-modal-input');
+        const err = document.getElementById('generic-modal-error');
+        const confirmBtn = document.getElementById('generic-modal-confirm');
+        const cancelBtn = document.getElementById('generic-modal-cancel');
+
+        document.getElementById('generic-modal-title').textContent = title;
+        document.getElementById('generic-modal-sub').textContent = sub;
+        confirmBtn.textContent = yesText;
+        cancelBtn.textContent = noText;
+        input.style.display = 'none';
+        err.classList.add('hidden');
+        err.textContent = '';
+        modal.style.display = 'flex';
+
+        function cleanup(result) {
+            modal.style.display = 'none';
+            input.style.display = '';
+            cancelBtn.textContent = 'Cancel';
+            confirmBtn.textContent = 'Confirm';
+            confirmBtn.removeEventListener('click', onConfirm);
+            cancelBtn.removeEventListener('click', onCancel);
+            document.removeEventListener('keydown', onKeydown);
+            resolve(result);
+        }
+        function onConfirm() { cleanup(true); }
+        function onCancel() { cleanup(false); }
+        function onKeydown(e) {
+            if (e.key === 'Enter') { e.preventDefault(); onConfirm(); }
+            if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+        }
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+        document.addEventListener('keydown', onKeydown);
+    });
+}
+
 async function requirePassword(expected, { title = 'Password Required', sub = 'Enter the password to continue.', confirmText = 'Confirm' } = {}) {
     const val = await askModal({ title, sub, type: 'password', placeholder: 'Password', confirmText });
     if (val === null) return false; // cancelled
@@ -1219,19 +1262,25 @@ async function submitToConsolidated(skipConfirm = false) {
 
     let revisionReason = null;
     if (editingIdx !== null) {
-        // Editing an existing item — capture why, for the Revision History tab
-        revisionReason = await askModal({
-            title: 'Reason for Change',
-            sub: "This will be saved to the item's revision history.",
-            type: 'text',
-            placeholder: 'e.g. Updated packaging dimensions',
-            confirmText: 'Save Reason'
+        // Editing an existing item — ask whether to record why, but never block the save
+        // either way. Previously an empty reason stopped the whole submission; now Yes and
+        // No both proceed straight to saving, they just differ on whether a reason gets
+        // logged to the Revision History tab.
+        const wantsReason = await askYesNo({
+            title: 'Include a Revision Reason?',
+            sub: 'You can record why this item was changed, or skip it and save directly.',
+            yesText: 'Yes, add a reason',
+            noText: 'No, save directly'
         });
-        if (revisionReason === null) return; // cancelled — stay in the editor
-        revisionReason = revisionReason.trim();
-        if (!revisionReason) {
-            showToast('⚠️', 'A reason is required to save changes to an existing item.');
-            return;
+        if (wantsReason) {
+            const reasonInput = await askModal({
+                title: 'Reason for Change',
+                sub: "This will be saved to the item's revision history.",
+                type: 'text',
+                placeholder: 'e.g. Updated packaging dimensions',
+                confirmText: 'Save Reason'
+            });
+            revisionReason = (reasonInput && reasonInput.trim()) || null;
         }
     }
 
@@ -2041,6 +2090,48 @@ function buildReportHTML(item) {
             </div>
         </div>`;
 
+    // BOM component dimension table — single measurement (no naming) by default, or a
+    // side-by-side comparison of named measurement sets once extra ones have been added
+    // via "+ Add Measurement" in the editor.
+    const buildDimensionsTable = (sub) => {
+        const extras = sub.extra_measurements || [];
+        if (extras.length === 0) {
+            return `
+            <table style="width:100%;border-collapse:collapse;font-size:10px">
+                <tr style="background:#f3f4f6;font-weight:700;color:#374151">
+                    <td style="padding:5px 8px;border:1px solid #d1d5db">DIMENSION</td>
+                    <td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">CM</td>
+                    <td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">INCHES</td>
+                </tr>
+                <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Length (L)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_l_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_l_in||'—'}</td></tr>
+                <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Width (W)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_w_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_w_in||'—'}</td></tr>
+                <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Height (H)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_h_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_h_in||'—'}</td></tr>
+                <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.weight_kg||'—'} kg ${!isNaN(parseFloat(sub.weight_kg))?'('+(parseFloat(sub.weight_kg)*2.205).toFixed(2)+' lbs)':''}</td></tr>
+                <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.volume_oz_l||'—'}</td></tr>
+            </table>`;
+        }
+        const sets = [
+            { name: sub.default_measurement_name || 'Default', l_cm: sub.dim_l_cm, l_in: sub.dim_l_in, w_cm: sub.dim_w_cm, w_in: sub.dim_w_in, h_cm: sub.dim_h_cm, h_in: sub.dim_h_in, weight_kg: sub.weight_kg, volume_oz_l: sub.volume_oz_l },
+            ...extras.map(ex => ({ name: ex.name || 'Unnamed', l_cm: ex.dim_l_cm, l_in: ex.dim_l_in, w_cm: ex.dim_w_cm, w_in: ex.dim_w_in, h_cm: ex.dim_h_cm, h_in: ex.dim_h_in, weight_kg: ex.weight_kg, volume_oz_l: ex.volume_oz_l }))
+        ];
+        const cell = (v) => `<td style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${v||'—'}</td>`;
+        return `
+        <table style="width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed">
+            <tr style="background:#f3f4f6;font-weight:700;color:#374151">
+                <td rowspan="2" style="padding:4px 6px;border:1px solid #d1d5db">DIMENSION</td>
+                ${sets.map(s => `<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center;word-break:break-word">${s.name}</td>`).join('')}
+            </tr>
+            <tr style="background:#f3f4f6;font-weight:700;color:#374151">
+                ${sets.map(() => `<td style="padding:3px 6px;border:1px solid #d1d5db;text-align:center">CM</td><td style="padding:3px 6px;border:1px solid #d1d5db;text-align:center">IN</td>`).join('')}
+            </tr>
+            <tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Length (L)</td>${sets.map(s=>cell(s.l_cm)+cell(s.l_in)).join('')}</tr>
+            <tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Width (W)</td>${sets.map(s=>cell(s.w_cm)+cell(s.w_in)).join('')}</tr>
+            <tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Height (H)</td>${sets.map(s=>cell(s.h_cm)+cell(s.h_in)).join('')}</tr>
+            <tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.weight_kg||'—'} kg ${!isNaN(parseFloat(s.weight_kg))?'('+(parseFloat(s.weight_kg)*2.205).toFixed(2)+' lbs)':''}</td>`).join('')}</tr>
+            <tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.volume_oz_l||'—'}</td>`).join('')}</tr>
+        </table>`;
+    };
+
     // How many physical pages this report will have depends on which optional
     // sections are toggled on for this item — numbering below reflects that.
     const numComponentPages = Math.max(Math.ceil((item.components||[]).length / COMPONENTS_PER_PAGE), 1);
@@ -2057,12 +2148,18 @@ function buildReportHTML(item) {
                     <td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af;font-weight:700;font-size:12px">${sub.description||'—'}</td>
                 </tr>
                 <tr>
-                    <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Material:</td>
-                    <td style="padding:6px 10px;border:1px solid #9ca3af;word-wrap:break-word;max-width:150px;white-space:pre-wrap">${sub.material||'—'}</td>
-                    <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Color/Pantone:</td>
-                    <td style="padding:6px 10px;border:1px solid #9ca3af;word-wrap:break-word;max-width:150px;white-space:pre-wrap">${sub.color||'—'}</td>
-                    <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Testing Standard:</td>
-                    <td style="padding:6px 10px;border:1px solid #9ca3af">${sub.reliability_test||'—'}</td>
+                    <td colspan="2" style="background:#f3f4f6;border:1px solid #9ca3af;padding:6px 10px;vertical-align:top">
+                        <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:4px">Material:</div>
+                        <div style="font-weight:400;word-wrap:break-word;white-space:pre-wrap">${sub.material||'—'}</div>
+                    </td>
+                    <td colspan="2" style="background:#f3f4f6;border:1px solid #9ca3af;padding:6px 10px;vertical-align:top">
+                        <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:4px">Color/Pantone:</div>
+                        <div style="font-weight:400;word-wrap:break-word;white-space:pre-wrap">${sub.color||'—'}</div>
+                    </td>
+                    <td colspan="2" style="background:#f3f4f6;border:1px solid #9ca3af;padding:6px 10px;vertical-align:top">
+                        <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:4px">Testing Standard:</div>
+                        <div style="font-weight:400;word-wrap:break-word;white-space:pre-wrap">${sub.reliability_test||'—'}</div>
+                    </td>
                 </tr>
                 <tr>
                     <td colspan="3" style="padding:12px;border:1px solid #9ca3af;text-align:center;vertical-align:top">
@@ -2072,18 +2169,8 @@ function buildReportHTML(item) {
                         </div>
                     </td>
                     <td colspan="3" style="padding:12px;border:1px solid #9ca3af;vertical-align:top">
-                        <table style="width:100%;border-collapse:collapse;font-size:10px">
-                            <tr style="background:#f3f4f6;font-weight:700;color:#374151">
-                                <td style="padding:5px 8px;border:1px solid #d1d5db">DIMENSION</td>
-                                <td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">CM</td>
-                                <td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">INCHES</td>
-                            </tr>
-                            <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Length (L)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_l_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_l_in||'—'}</td></tr>
-                            <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Width (W)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_w_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_w_in||'—'}</td></tr>
-                            <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Height (H)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_h_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_h_in||'—'}</td></tr>
-                            <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.weight_kg||'—'} kg ${sub.weight_kg?'('+(parseFloat(sub.weight_kg)*2.205).toFixed(2)+' lbs)':''}</td></tr>
-                            <tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.volume_oz_l||'—'}</td></tr>
-                        </table>
+                        <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px">DIMENSIONS</div>
+                        ${buildDimensionsTable(sub)}
                         ${sub.sub_remarks ? `<div style="margin-top:8px;padding:6px 8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:10px;color:#374151;white-space:normal;word-wrap:break-word;overflow-wrap:break-word;word-break:break-word"><span style="font-weight:700">Remarks:</span> ${sub.sub_remarks}</div>` : ''}
                     </td>
                 </tr>
@@ -2234,7 +2321,7 @@ function buildReportHTML(item) {
                     H: ${item.mc_h||'—'} cm ${item.mc_h?'('+(parseFloat(item.mc_h)/2.54).toFixed(2)+' inch)':''}
                 </td>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Gross Weight:</td>
-                <td style="padding:6px 10px;border:1px solid #9ca3af">${item.mc_weight||'—'} kg ${item.mc_weight?'('+(parseFloat(item.mc_weight)*2.205).toFixed(2)+' lbs)':''}</td>
+                <td style="padding:6px 10px;border:1px solid #9ca3af">${item.mc_weight||'—'} kg ${!isNaN(parseFloat(item.mc_weight))?'('+(parseFloat(item.mc_weight)*2.205).toFixed(2)+' lbs)':''}</td>
             </tr>
             <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Qty per Carton:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af">${item.mc_qty||'—'} units</td></tr>
             <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Carton Remarks:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af;font-style:italic">${item.mc_remarks||'—'}</td></tr>
@@ -2263,7 +2350,7 @@ function buildReportHTML(item) {
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Box Dim:</td>
                 <td colspan="3" style="padding:6px 10px;border:1px solid #9ca3af">L: ${item.gb_l||'—'} cm ${item.gb_l?'('+(parseFloat(item.gb_l)/2.54).toFixed(2)+' inch)':''} &nbsp;|&nbsp; W: ${item.gb_w||'—'} cm ${item.gb_w?'('+(parseFloat(item.gb_w)/2.54).toFixed(2)+' inch)':''} &nbsp;|&nbsp; H: ${item.gb_h||'—'} cm ${item.gb_h?'('+(parseFloat(item.gb_h)/2.54).toFixed(2)+' inch)':''}</td>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Gross Weight:</td>
-                <td style="padding:6px 10px;border:1px solid #9ca3af">${item.gb_weight||'—'} kg ${item.gb_weight?'('+(parseFloat(item.gb_weight)*2.205).toFixed(2)+' lbs)':''}</td>
+                <td style="padding:6px 10px;border:1px solid #9ca3af">${item.gb_weight||'—'} kg ${!isNaN(parseFloat(item.gb_weight))?'('+(parseFloat(item.gb_weight)*2.205).toFixed(2)+' lbs)':''}</td>
             </tr>
             <tr>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Qty / Carton:</td>
@@ -2513,7 +2600,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                 <div><label class="text-gray-400 block mb-1 font-bold">L (CM)</label><input type="text" value="${item.mc_l||''}" oninput="${dataRef}.mc_l=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.mc_l ? (parseFloat(item.mc_l)/2.54).toFixed(2)+' inch' : ''}</p></div>
                 <div><label class="text-gray-400 block mb-1 font-bold">W (CM)</label><input type="text" value="${item.mc_w||''}" oninput="${dataRef}.mc_w=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.mc_w ? (parseFloat(item.mc_w)/2.54).toFixed(2)+' inch' : ''}</p></div>
                 <div><label class="text-gray-400 block mb-1 font-bold">H (CM)</label><input type="text" value="${item.mc_h||''}" oninput="${dataRef}.mc_h=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.mc_h ? (parseFloat(item.mc_h)/2.54).toFixed(2)+' inch' : ''}</p></div>
-                <div><label class="text-gray-400 block mb-1 font-bold">Weight (KG)</label><input type="text" value="${item.mc_weight||''}" oninput="${dataRef}.mc_weight=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.mc_weight ? (parseFloat(item.mc_weight)*2.205).toFixed(2)+' lbs' : ''}</p></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">Weight (KG)</label><input type="text" value="${item.mc_weight||''}" oninput="${dataRef}.mc_weight=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${!isNaN(parseFloat(item.mc_weight)) ? (parseFloat(item.mc_weight)*2.205).toFixed(2)+' lbs' : ''}</p></div>
                 <div><label class="text-gray-400 block mb-1 font-bold">Qty/Carton</label><input type="text" value="${item.mc_qty||''}" oninput="${dataRef}.mc_qty=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
                 <div class="md:col-span-5"><label class="text-gray-400 block mb-1 font-bold">Carton Remarks</label><input type="text" value="${item.mc_remarks||''}" oninput="${dataRef}.mc_remarks=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
             </div>
@@ -2539,7 +2626,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                 <div><label class="text-gray-400 block mb-1 font-bold">L (CM)</label><input type="text" value="${item.gb_l||''}" oninput="${dataRef}.gb_l=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.gb_l?(parseFloat(item.gb_l)/2.54).toFixed(2)+' inch':''}</p></div>
                 <div><label class="text-gray-400 block mb-1 font-bold">W (CM)</label><input type="text" value="${item.gb_w||''}" oninput="${dataRef}.gb_w=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.gb_w?(parseFloat(item.gb_w)/2.54).toFixed(2)+' inch':''}</p></div>
                 <div><label class="text-gray-400 block mb-1 font-bold">H (CM)</label><input type="text" value="${item.gb_h||''}" oninput="${dataRef}.gb_h=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.gb_h?(parseFloat(item.gb_h)/2.54).toFixed(2)+' inch':''}</p></div>
-                <div><label class="text-gray-400 block mb-1 font-bold">Weight (KG)</label><input type="text" value="${item.gb_weight||''}" oninput="${dataRef}.gb_weight=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.gb_weight?(parseFloat(item.gb_weight)*2.205).toFixed(2)+' lbs':''}</p></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">Weight (KG)</label><input type="text" value="${item.gb_weight||''}" oninput="${dataRef}.gb_weight=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${!isNaN(parseFloat(item.gb_weight))?(parseFloat(item.gb_weight)*2.205).toFixed(2)+' lbs':''}</p></div>
                 <div><label class="text-gray-400 block mb-1 font-bold">Qty/Carton</label><input type="text" value="${item.gb_qty||''}" oninput="${dataRef}.gb_qty=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
                 <div><label class="text-gray-400 block mb-1 font-bold">Artwork URL</label><input type="text" value="${item.gb_artwork||''}" oninput="${dataRef}.gb_artwork=this.value" placeholder="URL" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
                 <div class="md:col-span-6"><label class="text-gray-400 block mb-1 font-bold">Gift Box Remarks</label><input type="text" value="${item.gb_remarks||''}" oninput="${dataRef}.gb_remarks=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
@@ -2602,7 +2689,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                         <div><label class="text-gray-400 font-bold block mb-0.5">L (CM)</label><input type="text" value="${sub.dim_l_cm||''}" oninput="editorHandleConversion(${sIdx},'l',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
                         <div><label class="text-gray-400 font-bold block mb-0.5">W (CM)</label><input type="text" value="${sub.dim_w_cm||''}" oninput="editorHandleConversion(${sIdx},'w',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
                         <div><label class="text-gray-400 font-bold block mb-0.5">H (CM)</label><input type="text" value="${sub.dim_h_cm||''}" oninput="editorHandleConversion(${sIdx},'h',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
-                        <div><label class="text-gray-400 font-bold block mb-0.5">Weight (KG)</label><input type="text" value="${sub.weight_kg||''}" oninput="${dataRef}.components[${sIdx}].weight_kg=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"><p class="text-[9px] text-gray-600 mt-0.5 text-center">${sub.weight_kg?(parseFloat(sub.weight_kg)*2.205).toFixed(2)+' lbs':''}</p></div>
+                        <div><label class="text-gray-400 font-bold block mb-0.5">Weight (KG)</label><input type="text" value="${sub.weight_kg||''}" oninput="${dataRef}.components[${sIdx}].weight_kg=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"><p class="text-[9px] text-gray-600 mt-0.5 text-center">${!isNaN(parseFloat(sub.weight_kg))?(parseFloat(sub.weight_kg)*2.205).toFixed(2)+' lbs':''}</p></div>
                         <div><label class="text-gray-400 font-bold block mb-0.5">Volume (OZ/L)</label><input type="text" value="${sub.volume_oz_l||''}" oninput="${dataRef}.components[${sIdx}].volume_oz_l=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
                     </div>
                     <div class="grid grid-cols-3 gap-2 pt-1 border-t border-gray-800 text-[10px] text-gray-400 font-mono">
@@ -2611,6 +2698,35 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                         <div>H (in): <input type="text" id="in-h-${mIdx}-${sIdx}" value="${sub.dim_h_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>
                     </div>
                 </div>
+
+                <!-- Extra measurements — only needed if you want to compare more than one
+                     sample/revision of this same part. With none added, the dimensions above
+                     are the only measurement and no naming is needed at all. -->
+                ${(sub.extra_measurements && sub.extra_measurements.length > 0) ? `
+                <div class="bg-gray-900 border border-gray-800 p-3 rounded-lg text-xs">
+                    <label class="text-gray-400 font-bold block mb-1">Name for the measurement above (required once you add another)</label>
+                    <input type="text" value="${sub.default_measurement_name||''}" oninput="${dataRef}.components[${sIdx}].default_measurement_name=this.value" placeholder="e.g. Item1" class="w-full bg-gray-950 rounded p-1.5 text-white border border-gray-800 focus:outline-none focus-pantone">
+                </div>` : ''}
+                ${(sub.extra_measurements||[]).map((ex,exIdx)=>`
+                <div class="bg-gray-900 border border-gray-800 p-3 rounded-lg text-xs space-y-2">
+                    <div class="flex justify-between items-center gap-2">
+                        <input type="text" value="${ex.name||''}" oninput="${dataRef}.components[${sIdx}].extra_measurements[${exIdx}].name=this.value" placeholder="Name this measurement (e.g. Item2)" class="flex-1 bg-gray-950 rounded p-1.5 text-white font-bold border border-gray-800 focus:outline-none focus-pantone">
+                        <button onclick="editorDeleteMeasurement(${sIdx},${exIdx})" class="text-gray-500 hover:text-red-400 cursor-pointer shrink-0 whitespace-nowrap">Remove ✕</button>
+                    </div>
+                    <div class="grid grid-cols-5 gap-3">
+                        <div><label class="text-gray-400 font-bold block mb-0.5">L (CM)</label><input type="text" value="${ex.dim_l_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'l',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
+                        <div><label class="text-gray-400 font-bold block mb-0.5">W (CM)</label><input type="text" value="${ex.dim_w_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'w',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
+                        <div><label class="text-gray-400 font-bold block mb-0.5">H (CM)</label><input type="text" value="${ex.dim_h_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'h',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
+                        <div><label class="text-gray-400 font-bold block mb-0.5">Weight (KG)</label><input type="text" value="${ex.weight_kg||''}" oninput="${dataRef}.components[${sIdx}].extra_measurements[${exIdx}].weight_kg=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"><p class="text-[9px] text-gray-600 mt-0.5 text-center">${!isNaN(parseFloat(ex.weight_kg))?(parseFloat(ex.weight_kg)*2.205).toFixed(2)+' lbs':''}</p></div>
+                        <div><label class="text-gray-400 font-bold block mb-0.5">Volume (OZ/L)</label><input type="text" value="${ex.volume_oz_l||''}" oninput="${dataRef}.components[${sIdx}].extra_measurements[${exIdx}].volume_oz_l=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 pt-1 border-t border-gray-800 text-[10px] text-gray-400 font-mono">
+                        <div>L (in): <input type="text" id="in-l-ex-${sIdx}-${exIdx}" value="${ex.dim_l_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>
+                        <div>W (in): <input type="text" id="in-w-ex-${sIdx}-${exIdx}" value="${ex.dim_w_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>
+                        <div>H (in): <input type="text" id="in-h-ex-${sIdx}-${exIdx}" value="${ex.dim_h_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>
+                    </div>
+                </div>`).join('')}
+                <button onclick="editorAddMeasurement(${sIdx})" class="text-[10px] text-pantone font-bold cursor-pointer hover:underline">+ Add Measurement</button>
             </div>`).join('')}
             <button onclick="editorAddSub()" class="text-xs text-pantone font-bold flex items-center gap-1 cursor-pointer hover:underline">➕ Add Component Part</button>
         </div>
@@ -2844,8 +2960,36 @@ function editorHandleConversion(sIdx, field, val) {
     if(wEl) wEl.value=c.dim_w_in;
     if(hEl) hEl.value=c.dim_h_in;
 }
+// Extra measurement sets — for comparing more than one sample/revision of the same BOM
+// part. The base L/W/H/Weight/Volume fields on the component itself stay as the single,
+// unnamed measurement when there's only one; adding an extra one is what introduces naming
+// (both for the new entry and, via default_measurement_name, for the original one too, so
+// they can be told apart once there's more than one).
+function editorAddMeasurement(sIdx) {
+    const c = editorItem.components[sIdx];
+    if (!c.extra_measurements) c.extra_measurements = [];
+    c.extra_measurements.push({ name:"", dim_l_cm:"", dim_w_cm:"", dim_h_cm:"", dim_l_in:"", dim_w_in:"", dim_h_in:"", weight_kg:"", volume_oz_l:"" });
+    renderEditorForm();
+}
+function editorDeleteMeasurement(sIdx, exIdx) {
+    editorItem.components[sIdx].extra_measurements.splice(exIdx, 1);
+    renderEditorForm();
+}
+function editorHandleExtraConversion(sIdx, exIdx, field, val) {
+    const n = parseFloat(val);
+    const ex = editorItem.components[sIdx].extra_measurements[exIdx];
+    if (field==='l'){ ex.dim_l_cm=val; ex.dim_l_in=!isNaN(n)?(n/2.54).toFixed(2):""; }
+    if (field==='w'){ ex.dim_w_cm=val; ex.dim_w_in=!isNaN(n)?(n/2.54).toFixed(2):""; }
+    if (field==='h'){ ex.dim_h_cm=val; ex.dim_h_in=!isNaN(n)?(n/2.54).toFixed(2):""; }
+    const lEl=document.getElementById('in-l-ex-'+sIdx+'-'+exIdx);
+    const wEl=document.getElementById('in-w-ex-'+sIdx+'-'+exIdx);
+    const hEl=document.getElementById('in-h-ex-'+sIdx+'-'+exIdx);
+    if(lEl) lEl.value=ex.dim_l_in;
+    if(wEl) wEl.value=ex.dim_w_in;
+    if(hEl) hEl.value=ex.dim_h_in;
+}
 function editorToggleSection(key) { editorItem[key]=!editorItem[key]; renderEditorForm(); }
-function editorAddSub() { editorItem.components.push({id:(editorItem.components.length+1).toString(),description:"",material:"",color:"",reliability_test:"",component_photo:"",sub_remarks:"",dim_l_cm:"",dim_w_cm:"",dim_h_cm:"",weight_kg:"",volume_oz_l:"",dim_l_in:"",dim_w_in:"",dim_h_in:""}); renderEditorForm(); }
+function editorAddSub() { editorItem.components.push({id:(editorItem.components.length+1).toString(),description:"",material:"",color:"",reliability_test:"",component_photo:"",sub_remarks:"",dim_l_cm:"",dim_w_cm:"",dim_h_cm:"",weight_kg:"",volume_oz_l:"",dim_l_in:"",dim_w_in:"",dim_h_in:"",default_measurement_name:"",extra_measurements:[]}); renderEditorForm(); }
 function editorDeleteSub(sIdx) { editorItem.components.splice(sIdx,1); renderEditorForm(); }
 function editorAddFeature() { editorItem.features.push({id:(editorItem.features.length+1).toString(),text:"",photo:""}); renderEditorForm(); }
 function editorDeleteFeature(fIdx) { editorItem.features.splice(fIdx,1); renderEditorForm(); }
