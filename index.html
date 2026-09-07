@@ -31,6 +31,11 @@
             pointer-events:none;max-width:360px;
         }
         #drive-toast.show { transform:translateX(-50%) translateY(0);opacity:1;pointer-events:auto; }
+
+        /* Drag-to-reorder (Component Parts) */
+        .component-drag-over { outline: 2px dashed var(--pantone-802c); outline-offset: 2px; }
+        .component-drag-handle { cursor: grab; }
+        .component-drag-handle:active { cursor: grabbing; }
         #drive-toast .toast-link { color:#60a5fa;text-decoration:underline;cursor:pointer;font-size:11px;display:block;margin-top:2px; }
 
         /* Modal */
@@ -2803,10 +2808,13 @@ function buildItemFormHTML(item, mIdx, isEditor) {
         <div id="section-components" class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
             <div class="text-[11px] font-black text-gray-400 uppercase tracking-widest">Component Details</div>
             ${(item.components||[]).map((sub,sIdx)=>`
-            <div class="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3">
+            <div class="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3" id="component-card-${sIdx}" draggable="true" ondragstart="editorSubDragStart(event,${sIdx})" ondragover="editorSubDragOver(event,${sIdx})" ondragleave="editorSubDragLeave(event)" ondrop="editorSubDrop(event,${sIdx})" ondragend="editorSubDragEnd(event)">
                 <div class="flex justify-between items-center border-b border-gray-800 pb-2 text-xs">
-                    <span class="text-pantone font-bold">PART ID: ${sub.id}</span>
-                    <button onclick="editorDeleteSub(${sIdx})" class="text-gray-500 hover:text-red-400 cursor-pointer">Remove ✕</button>
+                    <span class="component-drag-handle text-pantone font-bold" title="Drag to reorder">⠿ PART ID: ${sub.id}</span>
+                    <div class="flex items-center gap-3">
+                        <button onclick="editorInsertSub(${sIdx})" class="text-gray-500 hover:text-cyan-400 cursor-pointer text-[10px] font-bold" title="Insert a new blank part right after this one">⤵ Insert Below</button>
+                        <button onclick="editorDeleteSub(${sIdx})" class="text-gray-500 hover:text-red-400 cursor-pointer">Remove ✕</button>
+                    </div>
                 </div>
 
                 <!-- Top row: 3 fields + image -->
@@ -3300,8 +3308,56 @@ function editorToggleItemParam(key, defaultTrue) {
     editorItem[key] = !current;
     renderEditorForm();
 }
-function editorAddSub() { editorItem.components.push({id:(editorItem.components.length+1).toString(),description:"",material:"",color:"",reliability_test:"",component_photo:"",sub_remarks:"",dim_l_cm:"",dim_w_cm:"",dim_h_cm:"",weight_kg:"",volume_oz_l:"",dim_l_in:"",dim_w_in:"",dim_h_in:"",default_measurement_name:"",extra_measurements:[],show_length:true,show_width:true,show_height:true,show_weight:true,show_thickness:false,thickness_cm:"",thickness_in:"",show_volume:false,show_circumference:false,circumference_cm:"",circumference_in:"",show_elevation_angle:false,elevation_angle:""}); renderEditorForm(); }
-function editorDeleteSub(sIdx) { editorItem.components.splice(sIdx,1); renderEditorForm(); }
+function editorBlankComponent() {
+    return {id:"",description:"",material:"",color:"",reliability_test:"",component_photo:"",sub_remarks:"",dim_l_cm:"",dim_w_cm:"",dim_h_cm:"",weight_kg:"",volume_oz_l:"",dim_l_in:"",dim_w_in:"",dim_h_in:"",default_measurement_name:"",extra_measurements:[],show_length:true,show_width:true,show_height:true,show_weight:true,show_thickness:false,thickness_cm:"",thickness_in:"",show_volume:false,show_circumference:false,circumference_cm:"",circumference_in:"",show_elevation_angle:false,elevation_angle:""};
+}
+// Keeps PART numbers matching each component's actual position in the list (1, 2, 3...)
+// after any add / delete / insert / drag-reorder, so gaps or duplicates never appear.
+function editorRenumberComponents() {
+    (editorItem.components||[]).forEach((c,i) => { c.id = (i+1).toString(); });
+}
+function editorAddSub() { editorItem.components.push(editorBlankComponent()); editorRenumberComponents(); renderEditorForm(); }
+function editorDeleteSub(sIdx) { editorItem.components.splice(sIdx,1); editorRenumberComponents(); renderEditorForm(); }
+// Inserts a new blank part directly after afterIdx (e.g. between Part 9 and Part 10) and
+// renumbers everything so the new part slots in at the right position.
+function editorInsertSub(afterIdx) {
+    editorItem.components.splice(afterIdx+1, 0, editorBlankComponent());
+    editorRenumberComponents();
+    renderEditorForm();
+}
+
+// Drag-to-reorder for Component Parts (Monday.com-style): drag a card by its ⠿ handle and
+// drop it on another card to move it there; the rest of the list shifts and PART numbers
+// automatically re-sequence.
+let editorDragSrcIdx = null;
+function editorSubDragStart(e, sIdx) {
+    editorDragSrcIdx = sIdx;
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', String(sIdx)); } catch(err) {}
+}
+function editorSubDragOver(e, sIdx) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (editorDragSrcIdx !== null && editorDragSrcIdx !== sIdx) e.currentTarget.classList.add('component-drag-over');
+}
+function editorSubDragLeave(e) {
+    e.currentTarget.classList.remove('component-drag-over');
+}
+function editorSubDrop(e, targetIdx) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('component-drag-over');
+    if (editorDragSrcIdx === null || editorDragSrcIdx === targetIdx) { editorDragSrcIdx = null; return; }
+    const arr = editorItem.components;
+    const [moved] = arr.splice(editorDragSrcIdx, 1);
+    arr.splice(targetIdx, 0, moved);
+    editorDragSrcIdx = null;
+    editorRenumberComponents();
+    renderEditorForm();
+}
+function editorSubDragEnd(e) {
+    editorDragSrcIdx = null;
+    document.querySelectorAll('.component-drag-over').forEach(el => el.classList.remove('component-drag-over'));
+}
 function editorAddDrawing() {
     if (!editorItem.drawings) {
         // Migrate the old single-photo field the first time multi-drawing support is used.
