@@ -2729,7 +2729,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                 </div>`).join('')}
             </div>
             <div class="border-t border-gray-800 pt-3">
-                <label class="text-gray-400 font-bold block mb-2 text-xs">Package Content (shows as an Inclusion list above the Package Content Image on the PDF)</label>
+                <label class="text-gray-400 font-bold block mb-2 text-xs">Package Content</label>
                 ${(item.package_contents||[]).map((pc,pcIdx)=>`
                 <div class="flex items-center gap-2 mb-2">
                     <input type="text" value="${pc.qty||''}" oninput="${dataRef}.package_contents[${pcIdx}].qty=this.value" placeholder="Qty" class="w-16 bg-gray-950 border border-gray-800 rounded p-2 text-white text-xs text-center focus:outline-none focus-pantone">
@@ -3317,7 +3317,13 @@ function editorRenumberComponents() {
     (editorItem.components||[]).forEach((c,i) => { c.id = (i+1).toString(); });
 }
 function editorAddSub() { editorItem.components.push(editorBlankComponent()); editorRenumberComponents(); renderEditorForm(); }
-function editorDeleteSub(sIdx) { editorItem.components.splice(sIdx,1); editorRenumberComponents(); renderEditorForm(); }
+// Requires typing the password "deleteme" before a BOM component part can be removed, to
+// guard against accidental clicks on the Remove button.
+async function editorDeleteSub(sIdx) {
+    const ok = await requirePassword('deleteme', { title: 'Confirm Removal', sub: 'Enter the password to remove this component part.' });
+    if (!ok) return;
+    editorItem.components.splice(sIdx,1); editorRenumberComponents(); renderEditorForm();
+}
 // Inserts a new blank part directly after afterIdx (e.g. between Part 9 and Part 10) and
 // renumbers everything so the new part slots in at the right position.
 function editorInsertSub(afterIdx) {
