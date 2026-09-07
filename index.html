@@ -240,6 +240,7 @@
             <button onclick="handleBackupClick()" class="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">⬇️ Backup</button>
             <button onclick="handleRestoreClick()" class="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">📂 Restore</button>
         </div>
+        <button onclick="handleVersionHistoryClick()" class="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">🕐 Version History</button>
         <p class="text-[9px] text-gray-700 leading-tight">Saves to Google Drive when connected</p>
     </div>
 
@@ -427,6 +428,20 @@
                     <button onclick="closeRevisionModal()" class="bg-gray-800 text-gray-300 text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer hover:bg-gray-700">✕ Close</button>
                 </div>
                 <div id="revision-modal-body" class="space-y-2"></div>
+            </div>
+        </div>
+
+        <!-- VERSION HISTORY MODAL (automatic Drive backups — self-service recovery) -->
+        <div id="version-history-modal" onclick="if(event.target===this) closeVersionHistoryModal()" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;padding:24px">
+            <div style="background:#111827;border:1px solid #374151;border-radius:12px;max-width:640px;width:100%;max-height:80vh;overflow-y:auto" class="p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <div class="text-white font-black text-sm">Version History</div>
+                        <div class="text-gray-500 text-[11px] mt-0.5">Automatic snapshots taken before each save to Drive — restore one if something went wrong.</div>
+                    </div>
+                    <button onclick="closeVersionHistoryModal()" class="bg-gray-800 text-gray-300 text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer hover:bg-gray-700">✕ Close</button>
+                </div>
+                <div id="version-history-body" class="space-y-2"></div>
             </div>
         </div>
 
@@ -824,6 +839,7 @@ function renderEditorForm() {
     const container = document.getElementById('editor-form-container');
     container.innerHTML = buildItemFormHTML(item, 0, true);
     updateConsolidatedBadge();
+    scheduleDraftSave();
 }
 
 // ============================================================
@@ -1357,6 +1373,67 @@ async function submitToConsolidated(skipConfirm = false) {
 // ============================================================
 const STORAGE_KEY = 'rhino_spec_suite_v1';
 
+// ── Editor draft auto-save ────────────────────────────────
+// Everything typed/added in the editor lives only in the in-memory `editorItem` until
+// "Submit to Consolidated Manager" is clicked — before that, it was never written anywhere,
+// so a browser reload, crash, or session error while mid-edit silently lost all of it (photos
+// already uploaded to Drive survived, but the BOM rows/CTQ/etc. referencing them did not).
+// This continuously mirrors the in-progress editorItem to localStorage so it can be resumed
+// after an unexpected reload, independent of whether the item has been submitted yet.
+const EDITOR_DRAFT_KEY = 'rhino_editor_draft_v1';
+let draftSaveTimer = null;
+
+function saveEditorDraft() {
+    if (!editorItem) return;
+    try {
+        localStorage.setItem(EDITOR_DRAFT_KEY, JSON.stringify({
+            editingIdx, editorItem, savedAt: new Date().toISOString()
+        }));
+    } catch(e) {}
+}
+
+function scheduleDraftSave() {
+    clearTimeout(draftSaveTimer);
+    draftSaveTimer = setTimeout(saveEditorDraft, 800);
+}
+
+function clearEditorDraft() {
+    try { localStorage.removeItem(EDITOR_DRAFT_KEY); } catch(e) {}
+}
+
+function loadEditorDraft() {
+    try {
+        const raw = localStorage.getItem(EDITOR_DRAFT_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch(e) { return null; }
+}
+
+// Offers to resume any in-progress editor work found on this device that predates a reload —
+// called once after Drive data has loaded and the app is about to show its main screen.
+async function checkForEditorDraftRecovery() {
+    const draft = loadEditorDraft();
+    if (!draft || !draft.editorItem) return;
+    const savedTime = draft.savedAt ? new Date(draft.savedAt).toLocaleString() : 'an earlier session';
+    const label = draft.editorItem.sku_no || draft.editorItem.description || 'a new item';
+    const wantsResume = await askYesNo({
+        title: 'Resume unsaved editor work?',
+        sub: `Found in-progress edits for "${label}" auto-saved on this device at ${savedTime}, from before it was submitted to the Consolidated Manager. Resume editing, or discard it?`,
+        yesText: 'Resume editing',
+        noText: 'Discard'
+    });
+    if (wantsResume) {
+        editingIdx = (draft.editingIdx === null || draft.editingIdx === undefined) ? null : draft.editingIdx;
+        editorItem = draft.editorItem;
+        editorSnapshot = null; // ensure editorHasChanges() reads true so exit/submit prompts correctly
+        updateEditTabVisibility();
+        switchSheet('edit');
+        renderEditorForm();
+        showToast('♻️', 'Restored your unsaved editor draft.');
+    } else {
+        clearEditorDraft();
+    }
+}
+
 // ── Google Drive config ──────────────────────────────────
 const GDRIVE_FOLDER_ID = '19XXe0wgjApP-UXUVSW9sGYBGmKbbDcJF';
 const GDRIVE_IMAGES_FOLDER_ID = '1F7wlpwI4Jv47UXkhQJnKfibGOgikYYEG'; // Rhino USA Spec Images
@@ -1515,7 +1592,14 @@ function updateDriveButtonState() {
 }
 
 // ── Google Drive API helpers ──────────────────────────────
-async function gdriveFetch(url, method = 'GET', body = null, isUpload = false) {
+// A token can go stale mid-session for reasons that have nothing to do with how long the tab
+// has been open (background-tab timer throttling, an unusually short-lived token, clock drift,
+// a brief Google-side hiccup) — the scheduled 55-min refresh and the tab-visibility recheck
+// only cover the *predictable* cases. This is the catch-all: any request that comes back 401
+// gets ONE silent token refresh + automatic retry before it's treated as a real failure, so a
+// save made after a long editing stretch doesn't fall back to "local only" just because the
+// token happened to expire at that exact moment.
+async function gdriveFetch(url, method = 'GET', body = null, isUpload = false, isRetry = false) {
     if (!gdriveToken) throw new Error('Not authenticated');
     const headers = { 'Authorization': 'Bearer ' + gdriveToken };
     if (!isUpload) headers['Content-Type'] = 'application/json';
@@ -1525,7 +1609,16 @@ async function gdriveFetch(url, method = 'GET', body = null, isUpload = false) {
     if (!res.ok) {
         const errText = await res.text();
         console.error('Drive API error:', res.status, url, errText);
-        if (res.status === 401) { gdriveToken = null; gdriveEnabled = false; sessionStorage.removeItem('gdrive_token'); updateDriveButtonState(); }
+        if (res.status === 401) {
+            if (!isRetry) {
+                console.log('Drive token rejected — attempting one silent refresh + retry before giving up.');
+                const reconnected = await silentReconnectGDrive().catch(() => false);
+                if (reconnected) {
+                    return gdriveFetch(url, method, body, isUpload, true);
+                }
+            }
+            gdriveToken = null; gdriveEnabled = false; sessionStorage.removeItem('gdrive_token'); updateDriveButtonState();
+        }
         throw new Error(`Drive ${res.status}: ${errText.substring(0, 200)}`);
     }
     const text = await res.text();
@@ -1569,10 +1662,131 @@ async function findOrCreateDriveFile() {
     }
 }
 
+// ── Automatic version history ──────────────────────────────
+// Before every overwrite of the shared Drive file, this snapshots whatever is CURRENTLY on
+// Drive (not the about-to-be-saved copy) into a "Backups" subfolder, so a bad save — a stale
+// session, a truncated editorItem, a data-loss bug — never destroys the last-known-good state
+// without a trace. Throttled so rapid autosaves don't spam Drive with near-duplicate snapshots.
+const BACKUPS_FOLDER_NAME = 'Backups';
+const BACKUP_MIN_INTERVAL_MS = 3 * 60 * 1000; // at most one snapshot every 3 minutes
+const BACKUP_KEEP_COUNT = 40;
+let backupsFolderId = null;
+let lastBackupAt = 0;
+
+async function getOrCreateBackupsFolder() {
+    if (backupsFolderId) return backupsFolderId;
+    const q = encodeURIComponent(`name='${BACKUPS_FOLDER_NAME}' and '${GDRIVE_FOLDER_ID}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'`);
+    const results = await gdriveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    if (results.files && results.files.length > 0) {
+        backupsFolderId = results.files[0].id;
+    } else {
+        const meta = { name: BACKUPS_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder', parents: [GDRIVE_FOLDER_ID] };
+        const created = await gdriveFetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true', 'POST', meta);
+        backupsFolderId = created.id;
+    }
+    return backupsFolderId;
+}
+
+// Snapshots whatever is currently live on Drive right now, before it gets overwritten.
+// Best-effort: a failure here must never block the actual save.
+async function snapshotCurrentDriveFileIfDue(fileId) {
+    const now = Date.now();
+    if (now - lastBackupAt < BACKUP_MIN_INTERVAL_MS) return;
+    try {
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
+            headers: { 'Authorization': 'Bearer ' + gdriveToken }
+        });
+        if (!res.ok) return; // nothing to back up yet (e.g. brand-new file) — not an error
+        const currentRemoteText = await res.text();
+        if (!currentRemoteText) return;
+        const folderId = await getOrCreateBackupsFolder();
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        let itemCount = '';
+        try { itemCount = (JSON.parse(currentRemoteText).main_items || []).length; } catch(e) {}
+        const meta = { name: `RHINO-SpecSuite-Backup-${stamp}${itemCount !== '' ? `-${itemCount}items` : ''}.json`, mimeType: 'application/json', parents: [folderId] };
+        const created = await gdriveFetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true', 'POST', meta);
+        await gdriveFetch(`https://www.googleapis.com/upload/drive/v3/files/${created.id}?uploadType=media&supportsAllDrives=true`, 'PATCH', new Blob([currentRemoteText], { type: 'application/json' }), true);
+        lastBackupAt = now;
+        pruneOldBackups(folderId).catch(() => {});
+    } catch(err) {
+        console.error('Backup snapshot failed (non-blocking):', err.message);
+    }
+}
+
+async function pruneOldBackups(folderId) {
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
+    const results = await gdriveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,createdTime)&orderBy=createdTime desc&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    const files = results.files || [];
+    const toDelete = files.slice(BACKUP_KEEP_COUNT);
+    for (const f of toDelete) {
+        try { await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${f.id}?supportsAllDrives=true`, 'DELETE'); } catch(e) {}
+    }
+}
+
+async function listRecentBackups() {
+    const folderId = await getOrCreateBackupsFolder();
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
+    const results = await gdriveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,createdTime)&orderBy=createdTime desc&pageSize=${BACKUP_KEEP_COUNT}&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    return results.files || [];
+}
+
+async function handleVersionHistoryClick() {
+    if (!gdriveEnabled || !gdriveToken) { showToast('⚠️', 'Connect Google Drive first to see version history.'); return; }
+    const body = document.getElementById('version-history-body');
+    body.innerHTML = '<div class="text-gray-500 text-[11px]">Loading…</div>';
+    document.getElementById('version-history-modal').style.display = 'flex';
+    try {
+        const backups = await listRecentBackups();
+        if (backups.length === 0) {
+            body.innerHTML = '<div class="text-gray-500 text-[11px]">No automatic snapshots yet — one is taken the next time a save happens (at most once every few minutes).</div>';
+            return;
+        }
+        body.innerHTML = backups.map(f => {
+            const when = new Date(f.createdTime).toLocaleString();
+            return `
+            <div style="border:1px solid #374151;border-radius:8px;padding:10px 12px;background:#0b0f16" class="flex items-center justify-between gap-3">
+                <div>
+                    <div class="text-white text-[11px] font-bold">${when}</div>
+                    <div class="text-gray-500 text-[10px] font-mono">${f.name}</div>
+                </div>
+                <button onclick="restoreFromBackup('${f.id}','${when.replace(/'/g,"")}')" class="shrink-0 bg-pantone/20 text-pantone border border-pantone/40 text-[10px] font-bold px-3 py-1.5 rounded-lg cursor-pointer hover:bg-pantone/30">Restore</button>
+            </div>`;
+        }).join('');
+    } catch(err) {
+        body.innerHTML = `<div class="text-red-400 text-[11px]">Could not load version history: ${err.message}</div>`;
+    }
+}
+
+function closeVersionHistoryModal() {
+    document.getElementById('version-history-modal').style.display = 'none';
+}
+
+async function restoreFromBackup(fileId, whenLabel) {
+    const ok = await requirePassword('restoreme', { title: 'Confirm Restore', sub: `Enter the password to restore the snapshot from ${whenLabel}. This will overwrite your current data.` });
+    if (!ok) return;
+    try {
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
+            headers: { 'Authorization': 'Bearer ' + gdriveToken }
+        });
+        if (!res.ok) throw new Error('Drive ' + res.status);
+        const loaded = await res.json();
+        if (!loaded || !loaded.main_items) throw new Error('Snapshot file did not contain valid data');
+        currentData = loaded;
+        closeVersionHistoryModal();
+        triggerAutoSave();
+        buildConsolidatedView();
+        updateConsolidatedBadge();
+        showToast('♻️', `Restored snapshot from ${whenLabel} (${loaded.main_items.length} items) — saving to Drive…`);
+    } catch(err) {
+        showToast('❌', 'Restore failed: ' + err.message);
+    }
+}
+
 async function saveToDrive(data) {
     if (!gdriveEnabled || !gdriveToken) return false;
     try {
         const fileId = await findOrCreateDriveFile();
+        await snapshotCurrentDriveFileIfDue(fileId);
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         await gdriveFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`, 'PATCH', blob, true);
         return true;
@@ -1583,7 +1797,7 @@ async function saveToDrive(data) {
     }
 }
 
-async function loadFromDriveFile() {
+async function loadFromDriveFile(isRetry = false) {
     if (!gdriveEnabled || !gdriveToken) return null;
     try {
         const fileId = await findOrCreateDriveFile();
@@ -1591,6 +1805,13 @@ async function loadFromDriveFile() {
             headers: { 'Authorization': 'Bearer ' + gdriveToken }
         });
         if (!res.ok) {
+            // Same stale-token safety net as gdriveFetch: one silent refresh + retry before
+            // treating a 401 here as a real failure (this path bypasses gdriveFetch since it
+            // needs the raw file bytes, not a parsed API response).
+            if (res.status === 401 && !isRetry) {
+                const reconnected = await silentReconnectGDrive().catch(() => false);
+                if (reconnected) return loadFromDriveFile(true);
+            }
             console.error('Drive load failed:', res.status, await res.text().catch(()=>''));
             setStatus('❌ Could not load Drive data (status ' + res.status + ')', 'text-red-400');
             return null;
@@ -1825,6 +2046,7 @@ function finalizeSubmitToConsolidated(driveRef, revisionReason) {
     editingIdx = null;
     editorItem = createBlankItem((currentData.main_items.length + 1).toString());
     editorSnapshot = JSON.stringify(editorItem);
+    clearEditorDraft(); // this item's data now lives in currentData/Drive — the draft's job is done
     updateEditTabVisibility();
     renderEditorForm();
     updateConsolidatedBadge();
@@ -2808,9 +3030,9 @@ function buildItemFormHTML(item, mIdx, isEditor) {
         <div id="section-components" class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
             <div class="text-[11px] font-black text-gray-400 uppercase tracking-widest">Component Details</div>
             ${(item.components||[]).map((sub,sIdx)=>`
-            <div class="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3" id="component-card-${sIdx}" draggable="true" ondragstart="editorSubDragStart(event,${sIdx})" ondragover="editorSubDragOver(event,${sIdx})" ondragleave="editorSubDragLeave(event)" ondrop="editorSubDrop(event,${sIdx})" ondragend="editorSubDragEnd(event)">
+            <div class="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3" id="component-card-${sIdx}" draggable="false" ondragstart="editorSubDragStart(event,${sIdx})" ondragover="editorSubDragOver(event,${sIdx})" ondragleave="editorSubDragLeave(event)" ondrop="editorSubDrop(event,${sIdx})" ondragend="editorSubDragEnd(event)">
                 <div class="flex justify-between items-center border-b border-gray-800 pb-2 text-xs">
-                    <span class="component-drag-handle text-pantone font-bold" title="Drag to reorder">⠿ PART ID: ${sub.id}</span>
+                    <span class="component-drag-handle text-pantone font-bold" title="Drag to reorder" onmousedown="editorArmCardDrag(${sIdx})" onmouseup="editorDisarmCardDrag(${sIdx})">⠿ PART ID: ${sub.id}</span>
                     <div class="flex items-center gap-3">
                         <button onclick="editorInsertSub(${sIdx})" class="text-gray-500 hover:text-cyan-400 cursor-pointer text-[10px] font-bold" title="Insert a new blank part right after this one">⤵ Insert Below</button>
                         <button onclick="editorDeleteSub(${sIdx})" class="text-gray-500 hover:text-red-400 cursor-pointer">Remove ✕</button>
@@ -3335,7 +3557,20 @@ function editorInsertSub(afterIdx) {
 // Drag-to-reorder for Component Parts (Monday.com-style): drag a card by its ⠿ handle and
 // drop it on another card to move it there; the rest of the list shifts and PART numbers
 // automatically re-sequence.
+//
+// The card itself starts as draggable="false" so clicking/selecting text/using buttons
+// anywhere else in the card behaves normally — only pressing down on the ⠿ handle arms the
+// card's native `draggable` attribute for the duration of that press, which is what native
+// HTML5 drag-and-drop requires the flag to live on for the drag to actually work.
 let editorDragSrcIdx = null;
+function editorArmCardDrag(sIdx) {
+    const card = document.getElementById('component-card-' + sIdx);
+    if (card) card.draggable = true;
+}
+function editorDisarmCardDrag(sIdx) {
+    const card = document.getElementById('component-card-' + sIdx);
+    if (card) card.draggable = false;
+}
 function editorSubDragStart(e, sIdx) {
     editorDragSrcIdx = sIdx;
     e.dataTransfer.effectAllowed = 'move';
@@ -3362,6 +3597,7 @@ function editorSubDrop(e, targetIdx) {
 }
 function editorSubDragEnd(e) {
     editorDragSrcIdx = null;
+    if (e.currentTarget) e.currentTarget.draggable = false; // disarm even if mouseup fired outside the handle
     document.querySelectorAll('.component-drag-over').forEach(el => el.classList.remove('component-drag-over'));
 }
 function editorAddDrawing() {
@@ -3768,6 +4004,7 @@ function editorImportPastedText(type) {
     if (count > 0) {
         renderEditorForm();
         showToast('📋', `${count} row${count > 1 ? 's' : ''} imported`);
+        scheduleDraftSave();
     } else {
         showToast('⚠️', 'No valid rows found in the pasted text — check the format and try again.');
     }
@@ -4292,6 +4529,7 @@ async function onGoogleConnected() {
     updateConsolidatedBadge();
     switchSheet('consolidated'); // default landing view after login
     triggerSheetAutoSync();
+    checkForEditorDraftRecovery();
 }
 
 function updateSidebarUser() {
@@ -4360,7 +4598,7 @@ async function postLoginInit() {
 
 async function init() {
     // Re-check the nav lock on every keystroke in the editor (delegated — survives re-renders)
-    document.getElementById('sheet1-view')?.addEventListener('input', () => applyEditingNavLock());
+    document.getElementById('sheet1-view')?.addEventListener('input', () => { applyEditingNavLock(); scheduleDraftSave(); });
 
     // Load from localStorage immediately
     loadFromLocalStorage();
