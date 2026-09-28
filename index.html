@@ -142,6 +142,13 @@
     </style>
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen font-sans antialiased flex" onpaste="globalPasteInterceptor(event)">
+<!-- Persistent unsynced-data banner — unlike the old toast, this does not auto-hide. It only
+     disappears once the pending change is confirmed saved to Drive, and it retries in the
+     background on its own every 30s so you don't have to notice and click anything. -->
+<div id="unsynced-banner" style="display:none" class="fixed top-0 left-0 right-0 z-[100] bg-yellow-600 text-black text-xs font-bold px-4 py-2 flex items-center justify-center gap-3 shadow-lg">
+    <span id="unsynced-banner-msg">⚠️ Could not save to Drive — your last change is only on this device. Retrying automatically…</span>
+    <button onclick="connectGDrive('reconnect')" class="bg-black text-yellow-300 px-3 py-1 rounded-md cursor-pointer hover:opacity-80">Sign in to Drive now</button>
+</div>
 <!-- GOOGLE SIGN-IN SCREEN -->
 <div id="login-screen" style="position:fixed;inset:0;z-index:99999;background:#0a0f1a;display:flex;align-items:center;justify-content:center;font-family:Arial,sans-serif">
     <div style="width:380px;background:#111827;border:1px solid #1e293b;border-radius:16px;padding:36px;box-shadow:0 25px 60px rgba(0,0,0,0.6);text-align:center">
@@ -241,6 +248,7 @@
             <button onclick="handleRestoreClick()" class="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">📂 Restore</button>
         </div>
         <button onclick="handleVersionHistoryClick()" class="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">🕐 Version History</button>
+        <button onclick="reportStuckBase64Photos()" class="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">🧹 Clean Up Stuck Photos</button>
         <p class="text-[9px] text-gray-700 leading-tight">Saves to Google Drive when connected</p>
     </div>
 
@@ -279,6 +287,7 @@
                     </button>
                 </div>
             </div>
+
             <div id="editor-form-container"></div>
 
             <!-- Small floating "home" button — stays put no matter how far you've scrolled
@@ -289,6 +298,13 @@
                  Lives inside sheet1-view so it only shows up while you're actually in the
                  editor, not on other screens. -->
             <div style="position:fixed;bottom:20px;right:20px;z-index:40">
+                <!-- Live save status — pinned right above the quick-nav button so it's always
+                     visible on screen no matter how far you've scrolled, instead of sitting up
+                     at the top of the form where it would scroll out of view. -->
+                <div id="editor-save-status" class="flex flex-col items-end gap-0.5 text-[10px] font-bold px-3 py-1.5 rounded-lg bg-gray-900/90 border border-gray-700 shadow-lg mb-2">
+                    <span id="editor-save-status-local" class="text-gray-500">💾 Local backup: not yet saved</span>
+                    <span id="editor-save-status-drive" class="text-gray-500">☁️ Drive: not yet synced</span>
+                </div>
                 <div id="editor-quicknav-menu" class="hidden mb-2 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-1.5 text-xs w-60 max-h-80 overflow-y-auto space-y-0.5"></div>
                 <button onclick="toggleEditorQuickNav()" title="Jump to a section" class="w-9 h-9 rounded-full bg-pantone text-black shadow-lg cursor-pointer flex items-center justify-center text-base hover:opacity-90">🏠</button>
             </div>
@@ -798,6 +814,11 @@ function initEditorForm(existingItem = null, idx = null) {
     editorItem = existingItem ? JSON.parse(JSON.stringify(existingItem)) : createBlankItem((currentData.main_items.length + 1).toString());
     // Snapshot for change detection
     editorSnapshot = JSON.stringify(editorItem);
+    // Starting a fresh editing session — don't keep syncing into whatever draft file the
+    // previous session (a different item) was using.
+    draftDriveFileId = null;
+    draftDirtySinceLastDriveSync = false;
+    resetEditorSaveStatus();
     renderEditorForm();
 }
 
@@ -1373,51 +1394,165 @@ async function submitToConsolidated(skipConfirm = false) {
 // ============================================================
 const STORAGE_KEY = 'rhino_spec_suite_v1';
 
+// ── Local backup storage: IndexedDB, not localStorage ─────────────────────
+// localStorage has a hard ~5-10MB per-site quota in every browser, no matter how much disk
+// space the computer actually has. This app's full data set has grown past 250MB (mostly
+// photos that got stuck as embedded data instead of finishing their upload to Drive), so
+// every `localStorage.setItem(...)` call for the full data set was almost certainly failing
+// — silently, because those calls were wrapped in `catch(e) {}` with no visible warning to
+// anyone. That means the "saved locally" fallback that was supposed to protect your work
+// whenever a Drive save failed has likely not actually been working since the file first
+// grew past roughly 10MB. IndexedDB has no such small limit (browsers allow hundreds of MB
+// to a few GB per site), so the full-data-set local backup now lives there instead, and any
+// failure to write it is surfaced to the user instead of swallowed.
+const IDB_NAME = 'rhino_specsuite_db';
+const IDB_STORE = 'kv';
+let _idbOpenPromise = null;
+
+function idbOpen() {
+    if (_idbOpenPromise) return _idbOpenPromise;
+    _idbOpenPromise = new Promise((resolve, reject) => {
+        if (!window.indexedDB) { reject(new Error('IndexedDB is not available in this browser')); return; }
+        const req = indexedDB.open(IDB_NAME, 1);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
+    });
+    return _idbOpenPromise;
+}
+
+async function idbSet(key, value) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).put(value, key);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => reject(tx.error || new Error('IndexedDB write failed'));
+    });
+}
+
+async function idbGet(key) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const req = tx.objectStore(IDB_STORE).get(key);
+        req.onsuccess = () => resolve(req.result === undefined ? null : req.result);
+        req.onerror = () => reject(req.error || new Error('IndexedDB read failed'));
+    });
+}
+
+async function idbDelete(key) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).delete(key);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => reject(tx.error || new Error('IndexedDB delete failed'));
+    });
+}
+
+// The real local safety net now. A failure here is shown to the user (once, not spammed)
+// instead of being silently swallowed like the old localStorage calls were.
+let _localBackupFailWarned = false;
+async function saveLocalBackup(data) {
+    try {
+        await idbSet(STORAGE_KEY, data);
+        _localBackupFailWarned = false;
+        return true;
+    } catch (err) {
+        console.error('Local backup (IndexedDB) failed:', err);
+        if (!_localBackupFailWarned) {
+            _localBackupFailWarned = true;
+            showToastAction('⚠', 'Could not save a local backup copy on this device (' + err.message + '). If this keeps happening, tell IT right away.', 'Dismiss', () => {});
+        }
+        return false;
+    }
+}
+
+async function loadLocalBackup() {
+    try {
+        return await idbGet(STORAGE_KEY);
+    } catch (err) {
+        console.error('Local backup (IndexedDB) read failed:', err);
+        return null;
+    }
+}
+
 // ── Editor draft auto-save ────────────────────────────────
 // Everything typed/added in the editor lives only in the in-memory `editorItem` until
 // "Submit to Consolidated Manager" is clicked — before that, it was never written anywhere,
 // so a browser reload, crash, or session error while mid-edit silently lost all of it (photos
 // already uploaded to Drive survived, but the BOM rows/CTQ/etc. referencing them did not).
-// This continuously mirrors the in-progress editorItem to localStorage so it can be resumed
-// after an unexpected reload, independent of whether the item has been submitted yet.
+// This continuously mirrors the in-progress editorItem to IndexedDB (not localStorage — a
+// draft with a few not-yet-uploaded photos can be several MB, more than localStorage safely
+// holds) so it can be resumed after an unexpected reload, AND periodically pushes the same
+// draft to a small file in Drive (see "Editor draft — Drive sync" below), so there is always
+// a clear, truthful answer to "is what I just typed saved anywhere yet" — both on this device
+// and in Drive — instead of only finding out at Submit time, 20-30 minutes later.
 const EDITOR_DRAFT_KEY = 'rhino_editor_draft_v1';
 let draftSaveTimer = null;
+let draftDirtySinceLastDriveSync = false;
 
-function saveEditorDraft() {
+async function saveEditorDraft() {
     if (!editorItem) return;
     try {
-        localStorage.setItem(EDITOR_DRAFT_KEY, JSON.stringify({
+        await idbSet(EDITOR_DRAFT_KEY, {
             editingIdx, editorItem, savedAt: new Date().toISOString()
-        }));
-    } catch(e) {}
+        });
+        setEditorLocalStatus(new Date());
+    } catch(err) {
+        console.error('Editor draft local save failed:', err);
+        setEditorLocalStatus(null, err.message);
+    }
 }
 
 function scheduleDraftSave() {
+    draftDirtySinceLastDriveSync = true;
     clearTimeout(draftSaveTimer);
     draftSaveTimer = setTimeout(saveEditorDraft, 800);
 }
 
-function clearEditorDraft() {
-    try { localStorage.removeItem(EDITOR_DRAFT_KEY); } catch(e) {}
+async function clearEditorDraft() {
+    try { await idbDelete(EDITOR_DRAFT_KEY); } catch(e) {}
+    await clearDraftFromDrive();
+    draftDirtySinceLastDriveSync = false;
+    draftDriveFileId = null;
+    resetEditorSaveStatus();
 }
 
-function loadEditorDraft() {
+async function loadEditorDraft() {
     try {
-        const raw = localStorage.getItem(EDITOR_DRAFT_KEY);
-        return raw ? JSON.parse(raw) : null;
+        return await idbGet(EDITOR_DRAFT_KEY);
     } catch(e) { return null; }
 }
 
 // Offers to resume any in-progress editor work found on this device that predates a reload —
-// called once after Drive data has loaded and the app is about to show its main screen.
+// called once after Drive data has loaded and the app is about to show its main screen. Also
+// checks Drive's own Drafts folder as a third recovery layer — covers the case where this
+// exact device/browser's local copy is gone too (cleared, different device, etc.) but the
+// periodic Drive draft sync had already captured a more recent version.
 async function checkForEditorDraftRecovery() {
-    const draft = loadEditorDraft();
+    const localDraft = await loadEditorDraft();
+    let driveDraft = null;
+    try { driveDraft = await findMostRecentDriveDraftForCurrentUser(); } catch(e) {}
+
+    // Prefer whichever copy is newer.
+    let draft = localDraft;
+    let source = 'this device';
+    if (driveDraft && (!localDraft || new Date(driveDraft.savedAt) > new Date(localDraft.savedAt))) {
+        draft = driveDraft;
+        source = 'Google Drive';
+    }
     if (!draft || !draft.editorItem) return;
+
     const savedTime = draft.savedAt ? new Date(draft.savedAt).toLocaleString() : 'an earlier session';
     const label = draft.editorItem.sku_no || draft.editorItem.description || 'a new item';
     const wantsResume = await askYesNo({
         title: 'Resume unsaved editor work?',
-        sub: `Found in-progress edits for "${label}" auto-saved on this device at ${savedTime}, from before it was submitted to the Consolidated Manager. Resume editing, or discard it?`,
+        sub: `Found in-progress edits for "${label}" auto-saved from ${source} at ${savedTime}, from before it was submitted to the Consolidated Manager. Resume editing, or discard it?`,
         yesText: 'Resume editing',
         noText: 'Discard'
     });
@@ -1425,13 +1560,59 @@ async function checkForEditorDraftRecovery() {
         editingIdx = (draft.editingIdx === null || draft.editingIdx === undefined) ? null : draft.editingIdx;
         editorItem = draft.editorItem;
         editorSnapshot = null; // ensure editorHasChanges() reads true so exit/submit prompts correctly
+        draftDriveFileId = draft._driveFileId || null;
         updateEditTabVisibility();
         switchSheet('edit');
         renderEditorForm();
-        showToast('♻️', 'Restored your unsaved editor draft.');
+        showToast('♻️', `Restored your unsaved editor draft from ${source}.`);
     } else {
         clearEditorDraft();
     }
+}
+
+// ── Editor live save-status readout ───────────────────────
+// Always-visible, non-vanishing status shown right in the editor screen (separate from the
+// sidebar's transient status line), so it's never a guess whether what you just typed has
+// reached this device's backup and Drive.
+function setEditorLocalStatus(when, errorMsg) {
+    const el = document.getElementById('editor-save-status-local');
+    if (!el) return;
+    if (errorMsg) {
+        el.textContent = '⚠️ Local backup failed: ' + errorMsg;
+        el.className = 'text-red-400';
+    } else if (when) {
+        el.textContent = '💾 Local backup saved ' + when.toLocaleTimeString();
+        el.className = 'text-green-400';
+    } else {
+        el.textContent = '💾 Local backup: not yet saved';
+        el.className = 'text-gray-500';
+    }
+}
+
+function setEditorDriveStatus(state, extra) {
+    const el = document.getElementById('editor-save-status-drive');
+    if (!el) return;
+    if (state === 'saving') {
+        el.textContent = '☁️ Syncing to Drive…';
+        el.className = 'text-yellow-400';
+    } else if (state === 'synced') {
+        el.textContent = '☁️ Synced to Drive ' + (extra instanceof Date ? extra.toLocaleTimeString() : new Date().toLocaleTimeString());
+        el.className = 'text-green-400';
+    } else if (state === 'error') {
+        el.textContent = '❌ Drive sync failed' + (extra ? ' (' + extra + ')' : '') + ' — will retry';
+        el.className = 'text-red-400';
+    } else if (state === 'offline') {
+        el.textContent = '☁️ Drive not connected — draft is only saved on this device';
+        el.className = 'text-yellow-500';
+    } else {
+        el.textContent = '☁️ Drive: not yet synced';
+        el.className = 'text-gray-500';
+    }
+}
+
+function resetEditorSaveStatus() {
+    setEditorLocalStatus(null);
+    setEditorDriveStatus('idle');
 }
 
 // ── Google Drive config ──────────────────────────────────
@@ -1473,7 +1654,6 @@ async function silentReconnectGDrive() {
                         gdriveToken = resp.access_token;
                         gdriveEnabled = true;
                         sessionStorage.setItem('gdrive_token', gdriveToken);
-                        setTimeout(() => silentReconnectGDrive(), 55 * 60 * 1000);
                         updateDriveButtonState();
                         setStatus('✅ Drive connected', 'text-green-400');
                         console.log('✅ Google Drive auto-reconnected silently');
@@ -1499,6 +1679,44 @@ async function silentReconnectGDrive() {
         console.error('Silent reconnect error:', err);
         return false;
     }
+}
+
+// ── Token keep-alive ───────────────────────────────────────
+// Google's access token only lasts about an hour. The old approach scheduled exactly one
+// refresh via setTimeout(..., 55 minutes) — fragile for an editor session that can run for
+// hours: a background tab's timers can get throttled by the browser and fire late, and if
+// that single silent-refresh attempt happened to fail (a brief network hiccup, a third-party
+// storage restriction), there was no second attempt — the next thing to notice was a real 401
+// on an actual save, which is exactly the "I need to sign in again" interruption. This
+// replaces the one-shot timer with a recurring check every few minutes for as long as the app
+// is open, each with its own short retry-with-backoff, so a missed or failed refresh mostly
+// self-heals within a few minutes instead of surfacing as something you have to notice and
+// fix by hand.
+//
+// Honest limit: this cannot make re-signing-in impossible. A fully "never expires" session
+// needs a server-side refresh token, which for security reasons can never be handed to
+// client-side JS in a single HTML file — that would require real backend infrastructure (an
+// IT-run server holding the refresh token). What this does do is make silent recovery happen
+// far more often and far faster, and — combined with the local + Drive draft backups already
+// in place — a rare, unavoidable re-sign-in prompt is now just an interruption, not a risk to
+// your data.
+const TOKEN_KEEPALIVE_INTERVAL_MS = 4 * 60 * 1000;
+
+function startTokenKeepAliveLoop() {
+    setInterval(async () => {
+        if (!gdriveEnabled || !GDRIVE_CLIENT_ID) return;
+        let ok = await silentReconnectGDrive().catch(() => false);
+        if (ok) return;
+        // First attempt missed — try a couple more times, spaced out, before leaving it for
+        // the next scheduled check (or for an actual save attempt to surface the sign-in
+        // prompt as a last resort).
+        for (const delay of [15000, 45000]) {
+            await new Promise(r => setTimeout(r, delay));
+            if (!gdriveEnabled) return; // user signed out / disconnected meanwhile
+            ok = await silentReconnectGDrive().catch(() => false);
+            if (ok) return;
+        }
+    }, TOKEN_KEEPALIVE_INTERVAL_MS);
 }
 
 async function fetchGoogleUserInfo(token) {
@@ -1548,8 +1766,8 @@ async function connectGDrive(mode = 'login') {
                     gdriveToken = resp.access_token;
                     gdriveEnabled = true;
                     sessionStorage.setItem('gdrive_token', gdriveToken);
-                    // Auto-refresh every 55 min
-                    setTimeout(() => silentReconnectGDrive(), 55 * 60 * 1000);
+                    // Token refresh is now handled by the recurring keep-alive loop (see
+                    // startTokenKeepAliveLoop) instead of a single one-shot timer here.
                     setStatus('✅ Drive connected', 'text-green-400');
                     updateDriveButtonState();
                     // Identify the signed-in editor from their Google profile
@@ -1689,9 +1907,9 @@ async function getOrCreateBackupsFolder() {
 
 // Snapshots whatever is currently live on Drive right now, before it gets overwritten.
 // Best-effort: a failure here must never block the actual save.
-async function snapshotCurrentDriveFileIfDue(fileId) {
+async function snapshotCurrentDriveFileIfDue(fileId, force = false) {
     const now = Date.now();
-    if (now - lastBackupAt < BACKUP_MIN_INTERVAL_MS) return;
+    if (!force && now - lastBackupAt < BACKUP_MIN_INTERVAL_MS) return;
     try {
         const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
             headers: { 'Authorization': 'Bearer ' + gdriveToken }
@@ -1711,6 +1929,125 @@ async function snapshotCurrentDriveFileIfDue(fileId) {
     } catch(err) {
         console.error('Backup snapshot failed (non-blocking):', err.message);
     }
+}
+
+// ── Editor draft — Drive sync ─────────────────────────────
+// The single monolithic 258MB main data file can't be safely re-uploaded on every keystroke
+// (or even every minute) — that's the whole reason edits only reach it at Submit time. But
+// that left a real gap: there was no truthful way to say "your draft is saved in Drive" while
+// still editing. The fix isn't to touch the big file more often — it's to give the in-progress
+// draft its OWN small file in Drive, updated periodically while you work, and deleted once the
+// real Submit merges it into the main file. This file is tiny (one item, not 31), so syncing
+// it very frequently is cheap and safe — nowhere near Google Drive's per-user rate limits.
+// Set in milliseconds. 1000ms is close to the practical floor: each sync is a real network
+// round-trip to Drive (upload + a verification read-back), which realistically takes several
+// hundred ms on its own — draftSyncInFlight already skips any tick that lands while the
+// previous sync is still in flight, so going lower than this wouldn't sync any faster, it
+// would just skip more ticks while waiting on the network.
+const DRAFT_SYNC_INTERVAL_MS = 1000;
+const DRAFTS_FOLDER_NAME = 'Drafts';
+let draftsFolderId = null;
+let draftDriveFileId = null;
+let draftSyncInFlight = false;
+
+async function getOrCreateDraftsFolder() {
+    if (draftsFolderId) return draftsFolderId;
+    const q = encodeURIComponent(`name='${DRAFTS_FOLDER_NAME}' and '${GDRIVE_FOLDER_ID}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'`);
+    const results = await gdriveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    if (results.files && results.files.length > 0) {
+        draftsFolderId = results.files[0].id;
+    } else {
+        const meta = { name: DRAFTS_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder', parents: [GDRIVE_FOLDER_ID] };
+        const created = await gdriveFetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true', 'POST', meta);
+        draftsFolderId = created.id;
+    }
+    return draftsFolderId;
+}
+
+function draftFileNameFor(item) {
+    const label = (item && (item.sku_no || item.description)) || 'new-item';
+    const safeLabel = String(label).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
+    const who = currentEditorName().replace(/[^a-zA-Z0-9_-]/g, '_');
+    return `Draft-${who}-${safeLabel}.json`;
+}
+
+// Pushes the current in-progress draft to its own small Drive file. Verified the same way the
+// main save is: after uploading, re-read the file's size back from Drive and confirm it
+// matches what was sent, rather than trusting an error-free request.
+async function syncDraftToDrive() {
+    if (!editorItem) return;
+    if (!gdriveEnabled || !gdriveToken) { setEditorDriveStatus('offline'); return; }
+    if (draftSyncInFlight) return;
+    draftSyncInFlight = true;
+    setEditorDriveStatus('saving');
+    try {
+        const folderId = await getOrCreateDraftsFolder();
+        const payload = JSON.stringify({
+            editingIdx, editorItem, savedAt: new Date().toISOString(), by: currentEditorName()
+        });
+        if (!draftDriveFileId) {
+            const meta = { name: draftFileNameFor(editorItem), mimeType: 'application/json', parents: [folderId] };
+            const created = await gdriveFetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true', 'POST', meta);
+            draftDriveFileId = created.id;
+        }
+        const blob = new Blob([payload], { type: 'application/json' });
+        await gdriveFetch(`https://www.googleapis.com/upload/drive/v3/files/${draftDriveFileId}?uploadType=media&supportsAllDrives=true`, 'PATCH', blob, true);
+        const meta2 = await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${draftDriveFileId}?fields=size&supportsAllDrives=true`);
+        const expectedSize = blob.size;
+        const remoteSize = meta2 && meta2.size ? parseInt(meta2.size, 10) : -1;
+        if (remoteSize !== expectedSize) throw new Error('could not verify upload');
+        draftDirtySinceLastDriveSync = false;
+        setEditorDriveStatus('synced', new Date());
+    } catch(err) {
+        console.error('Draft Drive sync failed:', err);
+        setEditorDriveStatus('error', err.message);
+    } finally {
+        draftSyncInFlight = false;
+    }
+}
+
+async function clearDraftFromDrive() {
+    if (!draftDriveFileId) return;
+    const idToDelete = draftDriveFileId;
+    draftDriveFileId = null;
+    if (!gdriveEnabled || !gdriveToken) return;
+    try { await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${idToDelete}?supportsAllDrives=true`, 'DELETE'); } catch(e) {}
+}
+
+// Third recovery layer: if this device's local draft copy is gone (cleared, different
+// device/browser), check Drive's Drafts folder for the most recent one saved under this
+// user's name, so a lost local draft doesn't automatically mean lost work.
+async function findMostRecentDriveDraftForCurrentUser() {
+    if (!gdriveEnabled || !gdriveToken) return null;
+    const folderId = await getOrCreateDraftsFolder();
+    const who = currentEditorName().replace(/[^a-zA-Z0-9_-]/g, '_');
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and name contains 'Draft-${who}-'`);
+    const results = await gdriveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=5&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    const files = results.files || [];
+    if (files.length === 0) return null;
+    const newest = files[0];
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${newest.id}?alt=media&supportsAllDrives=true`, {
+        headers: { 'Authorization': 'Bearer ' + gdriveToken }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || !data.editorItem) return null;
+    data._driveFileId = newest.id;
+    return data;
+}
+
+// Guarantees a Drive draft sync happens at least every few seconds while there's unsynced
+// editor input, independent of whether you're still actively typing (a pure typing-pause
+// debounce would never fire during a long continuous editing stretch). Started once in init().
+// draftSyncInFlight naturally self-paces this if one upload ever takes longer than the
+// interval (e.g. a draft with a few not-yet-uploaded photos) — the next tick just skips
+// until the in-progress one finishes, so syncs never pile up on top of each other.
+function startDraftDriveSyncLoop() {
+    setInterval(() => {
+        if (editorItem && draftDirtySinceLastDriveSync && !draftSyncInFlight) {
+            syncDraftToDrive();
+        }
+    }, DRAFT_SYNC_INTERVAL_MS);
 }
 
 async function pruneOldBackups(folderId) {
@@ -1771,12 +2108,33 @@ async function restoreFromBackup(fileId, whenLabel) {
         if (!res.ok) throw new Error('Drive ' + res.status);
         const loaded = await res.json();
         if (!loaded || !loaded.main_items) throw new Error('Snapshot file did not contain valid data');
+
+        // Fixed: a restore used to overwrite the live data with no guarantee the version being
+        // replaced was itself backed up — the regular snapshot-on-save is throttled to once
+        // every 3 minutes, so a restore performed shortly after a save could skip backing up
+        // the very thing it was about to erase. This is what actually destroyed the last local
+        // copy in a prior incident. A restore is rare and deliberate, so it always forces an
+        // unthrottled snapshot of whatever is live right now before touching anything.
+        try {
+            const liveFileId = await findOrCreateDriveFile();
+            await snapshotCurrentDriveFileIfDue(liveFileId, true);
+        } catch (snapErr) {
+            const proceedAnyway = await askYesNo({
+                title: 'Could not back up current data first',
+                sub: `Backing up what's currently live failed (${snapErr.message}). Restoring now would overwrite it with no safety copy. Restore anyway?`,
+                yesText: 'Restore anyway',
+                noText: 'Cancel'
+            });
+            if (!proceedAnyway) return;
+        }
+
         currentData = loaded;
+        await saveLocalBackup(currentData);
         closeVersionHistoryModal();
         triggerAutoSave();
         buildConsolidatedView();
         updateConsolidatedBadge();
-        showToast('♻️', `Restored snapshot from ${whenLabel} (${loaded.main_items.length} items) — saving to Drive…`);
+        showToast('♻️', `Restored snapshot from ${whenLabel} (${loaded.main_items.length} items) — the version just replaced was itself backed up first, and this restore is now saving to Drive…`);
     } catch(err) {
         showToast('❌', 'Restore failed: ' + err.message);
     }
@@ -1787,8 +2145,21 @@ async function saveToDrive(data) {
     try {
         const fileId = await findOrCreateDriveFile();
         await snapshotCurrentDriveFileIfDue(fileId);
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const payload = JSON.stringify(data, null, 2);
+        const blob = new Blob([payload], { type: 'application/json' });
         await gdriveFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`, 'PATCH', blob, true);
+
+        // Verified, not assumed: an upload request that didn't throw an error is not the same
+        // thing as Drive actually holding the new content — re-read the file's own reported
+        // size and confirm it matches what was just sent before calling this a real success.
+        const meta = await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=size,modifiedTime&supportsAllDrives=true`);
+        const expectedSize = blob.size;
+        const remoteSize = meta && meta.size ? parseInt(meta.size, 10) : -1;
+        if (remoteSize !== expectedSize) {
+            console.error('Drive save verification mismatch:', { expectedSize, remoteSize });
+            setStatus('❌ Drive save could not be verified', 'text-red-400');
+            return false;
+        }
         return true;
     } catch(err) {
         console.error('Drive save error:', err);
@@ -1827,21 +2198,59 @@ async function loadFromDriveFile(isRetry = false) {
 
 
 // ── Status indicator ──────────────────────────────────────
+// Bug fixed: a green "Drive connected" status schedules itself to clear after 3s. If a
+// save started right after (e.g. the reconnect-then-save flow) later shows a WARNING
+// ("Saved locally only") in that same window, the earlier green message's stale timer
+// was firing unconditionally and wiping out that warning — making it look like the save
+// had succeeded ("Drive connected") when it had actually silently failed. Fix: each call
+// gets a generation number, and the auto-clear only fires if no newer message has since
+// replaced it.
+let statusSeq = 0;
 function setStatus(msg, color) {
     const el = document.getElementById('drive-save-indicator');
     if (!el) return;
+    const seq = ++statusSeq;
     el.textContent = msg;
     el.className = `text-[10px] font-bold ${color}`;
-    if (color === 'text-green-400') setTimeout(() => { if(el) el.textContent = ''; }, 3000);
+    if (color === 'text-green-400') {
+        setTimeout(() => { if (el && statusSeq === seq) el.textContent = ''; }, 3000);
+    }
 }
 
-// ── Auto-save: Drive primary, localStorage fallback ───────
+// ── Auto-save: Drive primary, IndexedDB fallback ──────────
 async function triggerAutoSave() {
-    // Always save to localStorage immediately
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentData)); } catch(e) {}
+    // Always save a local backup immediately
+    await saveLocalBackup(currentData);
     // Debounce Drive save
     clearTimeout(saveDebounceTimer);
     saveDebounceTimer = setTimeout(() => saveData(), 1500);
+}
+
+// ── Unsynced-data banner + background auto-retry ──────────
+// Replaces the old behavior where a failed Drive save showed a toast that quietly vanished —
+// this stays on screen until the save is actually confirmed, and keeps retrying by itself in
+// the background so recovering doesn't depend on someone noticing and clicking something.
+let unsyncedRetryTimer = null;
+let hasUnsyncedChanges = false;
+
+function showUnsyncedBanner(msg) {
+    hasUnsyncedChanges = true;
+    const banner = document.getElementById('unsynced-banner');
+    const msgEl = document.getElementById('unsynced-banner-msg');
+    if (msgEl && msg) msgEl.textContent = msg;
+    if (banner) banner.style.display = 'flex';
+    clearInterval(unsyncedRetryTimer);
+    unsyncedRetryTimer = setInterval(() => {
+        if (hasUnsyncedChanges) saveData();
+    }, 30000);
+}
+
+function hideUnsyncedBanner() {
+    hasUnsyncedChanges = false;
+    clearInterval(unsyncedRetryTimer);
+    unsyncedRetryTimer = null;
+    const banner = document.getElementById('unsynced-banner');
+    if (banner) banner.style.display = 'none';
 }
 
 // Folds any items into `target` that exist in `source` but not in `target`
@@ -1882,15 +2291,18 @@ async function saveData() {
         const saved = await saveToDrive(currentData);
         if (saved) {
             setStatus('✅ Saved to Drive', 'text-green-400');
-            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentData)); } catch(e) {}
+            await saveLocalBackup(currentData);
+            hideUnsyncedBanner();
             if (typeof buildConsolidatedView === 'function' && !document.getElementById('consolidated-view').classList.contains('hidden')) buildConsolidatedView();
             updateConsolidatedBadge();
             return;
         }
         // saveToDrive failed — if it was a 401 it already reset gdriveEnabled/gdriveToken
-        // below via gdriveFetch; either way, the change only exists on this device now.
+        // below via gdriveFetch; either way, the change only exists on this device now. This
+        // now shows as a persistent banner (not a toast that vanishes) and keeps retrying
+        // itself every 30s in the background until it succeeds.
         setStatus('📦 Saved locally only', 'text-yellow-500');
-        showToastAction('🔑', 'Could not save to Drive — this change is only on this device. Sign in again to sync it.', 'Sign in to Drive', () => connectGDrive('reconnect'));
+        showUnsyncedBanner('⚠️ Could not save to Drive — your last change is only on this device. Retrying automatically…');
         return;
     }
     // Not connected to Drive at all (session expired, never signed in this tab, etc.) —
@@ -1898,10 +2310,10 @@ async function saveData() {
     // 'reconnect' mode here: there may be an in-progress editor form (e.g. an item full of
     // pasted photos) that hasn't been submitted yet, and a full re-login must never touch it.
     setStatus('📦 Saved locally', 'text-gray-500');
-    showToastAction('🔑', 'Google Drive isn\'t connected — this change is only on this device until you sign in.', 'Sign in to Drive', () => connectGDrive('reconnect'));
+    showUnsyncedBanner('⚠️ Google Drive isn\'t connected — your last change is only on this device.');
 }
 
-// ── Load: Drive primary, localStorage fallback ────────────
+// ── Load: Drive primary, IndexedDB fallback ───────────────
 async function loadAllData() {
     if (gdriveEnabled && gdriveToken) {
         const data = await loadFromDriveFile();
@@ -1909,27 +2321,37 @@ async function loadAllData() {
             currentData = data;
             if (!currentData.users) currentData.users = [];
             if (currentData.users.length === 0) currentData.users = [...DEFAULT_USERS];
-            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentData)); } catch(e) {}
+            await saveLocalBackup(currentData);
             try { localStorage.setItem(USERS_KEY, JSON.stringify(currentData.users)); } catch(e) {}
             return true;
         }
     }
-    // Fallback to localStorage
-    try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-            const loaded = JSON.parse(raw);
-            if (loaded && loaded.main_items) { currentData = loaded; return true; }
-        }
-    } catch(err) {}
+    // Fallback to the local backup
+    const loaded = await loadLocalBackup();
+    if (loaded && loaded.main_items) { currentData = loaded; return true; }
     return false;
 }
 
-function loadFromLocalStorage() {
+// Loads whatever local backup exists (IndexedDB, with a one-time migration from the old,
+// much smaller localStorage copy if IndexedDB is still empty — e.g. right after this update).
+async function loadFromLocalStorage() {
     try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return false;
-        const loaded = JSON.parse(raw);
+        let loaded = await loadLocalBackup();
+        if (!loaded) {
+            // One-time migration path: older versions of this app kept the full data set in
+            // localStorage. If IndexedDB has nothing yet but an old localStorage copy exists,
+            // adopt it once so nothing already saved there appears to have vanished.
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (raw) {
+                    const legacy = JSON.parse(raw);
+                    if (legacy && legacy.main_items) {
+                        loaded = legacy;
+                        await saveLocalBackup(loaded);
+                    }
+                }
+            } catch(e) {}
+        }
         if (loaded && loaded.main_items) {
             currentData = loaded;
             // Ensure users array exists
@@ -1938,7 +2360,7 @@ function loadFromLocalStorage() {
             if (currentData.users.length === 0) {
                 currentData.users = [...DEFAULT_USERS];
             }
-            // Also restore users to localStorage cache
+            // Also restore users to localStorage cache (small, well within quota)
             try { localStorage.setItem(USERS_KEY, JSON.stringify(currentData.users)); } catch(e) {}
             return true;
         }
@@ -4138,6 +4560,15 @@ function editorImportCSV(event, type) {
 // PHOTO UPLOAD TO GOOGLE DRIVE
 // ============================================================
 async function uploadPhotoToDrive(blob, filename, oldUrl = null) {
+    const sku = (editorItem && editorItem.sku_no) || 'unknown-sku';
+    return uploadPhotoToDriveForSku(blob, filename, sku, oldUrl);
+}
+
+// Same upload logic as uploadPhotoToDrive, but takes the SKU explicitly instead of reading
+// it off the live `editorItem` global — needed so the base64-cleanup tool (which processes
+// every item in currentData, not just whichever one happens to be open in the editor right
+// now) always files a photo under the correct item's own Drive subfolder.
+async function uploadPhotoToDriveForSku(blob, filename, sku, oldUrl = null) {
     if (!gdriveEnabled || !gdriveToken) {
         return new Promise((resolve) => {
             const reader = new FileReader();
@@ -4163,8 +4594,7 @@ async function uploadPhotoToDrive(blob, filename, oldUrl = null) {
             }
         }
 
-        const sku = editorItem.sku_no || 'unknown-sku';
-        const subfolderId = await getOrCreatePhotoFolder(sku);
+        const subfolderId = await getOrCreatePhotoFolder(sku || 'unknown-sku');
 
         // Build multipart upload body
         const boundary = '-------rhino' + Date.now();
@@ -4249,6 +4679,135 @@ async function getOrCreatePhotoFolder(sku) {
     })();
 
     return await photoFolderPending[sku];
+}
+
+// ============================================================
+// CLEANUP: stuck base64 photos → proper Drive links
+// ============================================================
+// Root cause of the master file growing from under 1MB to 250MB+: when a photo upload to
+// Drive fails (offline, a stale token, a dropped connection), the instant-preview base64 that
+// gets set immediately for display was designed to be temporary — replaced with a small Drive
+// link once the background upload succeeds. If that background upload never succeeds, the
+// base64 (which is ~33% larger than the image itself) stays in the JSON forever. This scans
+// every item for any string field still holding raw "data:image..." data, uploads it properly
+// to that item's own Drive photo folder, and replaces it with the same kind of link a normal,
+// successful upload would have produced — read-only, non-destructive to anything else, and it
+// can be safely re-run (already-fixed fields are simply skipped).
+function collectBase64PhotoRefs(obj, path, results) {
+    if (obj === null || obj === undefined) return;
+    if (typeof obj === 'string') {
+        if (obj.startsWith('data:image')) results.push({ path: path.slice(), value: obj });
+        return;
+    }
+    if (Array.isArray(obj)) {
+        obj.forEach((v, i) => collectBase64PhotoRefs(v, path.concat(i), results));
+        return;
+    }
+    if (typeof obj === 'object') {
+        for (const k of Object.keys(obj)) collectBase64PhotoRefs(obj[k], path.concat(k), results);
+    }
+}
+
+function getByPath(obj, path) {
+    let cur = obj;
+    for (const p of path) { if (cur == null) return undefined; cur = cur[p]; }
+    return cur;
+}
+
+function setByPath(obj, path, value) {
+    let cur = obj;
+    for (let i = 0; i < path.length - 1; i++) cur = cur[path[i]];
+    cur[path[path.length - 1]] = value;
+}
+
+function base64DataUrlToBlob(dataUrl) {
+    const commaIdx = dataUrl.indexOf(',');
+    const header = dataUrl.slice(0, commaIdx);
+    const base64 = dataUrl.slice(commaIdx + 1);
+    const mimeMatch = header.match(/data:([^;]+);base64/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+}
+
+// Read-only pass: reports how much of the file is actually this kind of bloat before anything
+// is changed, so the decision to run the real cleanup is based on real numbers, not a guess.
+function scanForStuckBase64Photos() {
+    const items = currentData.main_items || [];
+    let totalRefs = 0, totalBytes = 0;
+    const perItem = [];
+    for (const item of items) {
+        const refs = [];
+        collectBase64PhotoRefs(item, [], refs);
+        if (refs.length > 0) {
+            const bytes = refs.reduce((sum, r) => sum + r.value.length, 0);
+            perItem.push({ sku: item.sku_no || '(no SKU)', count: refs.length, bytes });
+            totalRefs += refs.length;
+            totalBytes += bytes;
+        }
+    }
+    return { totalRefs, totalBytes, perItem };
+}
+
+async function reportStuckBase64Photos() {
+    showToast('🔎', 'Scanning current data for stuck base64 photos…');
+    const { totalRefs, totalBytes, perItem } = scanForStuckBase64Photos();
+    if (totalRefs === 0) {
+        showToast('✅', 'No stuck base64 photos found — every photo is already a proper Drive link.');
+        return;
+    }
+    const mb = (totalBytes / (1024 * 1024)).toFixed(1);
+    const lines = perItem.slice(0, 15).map(p => `${p.sku}: ${p.count} photo(s), ~${(p.bytes / (1024*1024)).toFixed(1)}MB`).join('\n');
+    const more = perItem.length > 15 ? `\n…and ${perItem.length - 15} more item(s)` : '';
+    const proceed = await askYesNo({
+        title: `Found ~${mb}MB of stuck photo data across ${perItem.length} item(s)`,
+        sub: `${lines}${more}\n\nRun the cleanup now? Each photo will be uploaded to Drive properly and replaced with a link — this can take a while for a large amount of data and should not be interrupted once started.`,
+        yesText: 'Run cleanup now',
+        noText: 'Not yet'
+    });
+    if (proceed) await cleanupStuckBase64Photos();
+}
+
+async function cleanupStuckBase64Photos() {
+    if (!gdriveEnabled || !gdriveToken) { showToast('⚠️', 'Connect Google Drive first — the cleanup needs to upload photos.'); return; }
+    const ok = await requirePassword('cleanupme', { title: 'Confirm Cleanup', sub: 'This uploads every stuck photo to Drive and shrinks the master file. Enter the password to proceed.' });
+    if (!ok) return;
+
+    const items = currentData.main_items || [];
+    let totalFound = 0, totalFixed = 0, totalFailed = 0;
+    showToast('🧹', 'Cleanup started — do not close this tab until it finishes.', null, null, 20000);
+
+    for (const item of items) {
+        const refs = [];
+        collectBase64PhotoRefs(item, [], refs);
+        totalFound += refs.length;
+        for (const ref of refs) {
+            try {
+                const blob = base64DataUrlToBlob(ref.value);
+                const filename = `${item.sku_no || 'item'}-${ref.path.join('_')}-${Date.now()}.png`;
+                const driveUrl = await uploadPhotoToDriveForSku(blob, filename, item.sku_no);
+                if (typeof driveUrl === 'string' && driveUrl.startsWith('data:image')) {
+                    // Upload itself fell back to base64 again (still offline/failing) — leave
+                    // it as-is rather than writing back the exact same stuck value.
+                    totalFailed++;
+                    continue;
+                }
+                setByPath(item, ref.path, driveUrl);
+                totalFixed++;
+            } catch (err) {
+                console.error('Cleanup: failed to upload one photo:', err.message);
+                totalFailed++;
+            }
+        }
+    }
+
+    if (totalFixed > 0) {
+        await triggerAutoSave();
+        buildConsolidatedView();
+    }
+    showToast('✅', `Cleanup finished: ${totalFixed} photo(s) converted to Drive links, ${totalFailed} could not be converted (still base64, safe to re-run later), out of ${totalFound} found.`, null, null, 15000);
 }
 
 // ============================================================
@@ -4513,7 +5072,7 @@ async function onGoogleConnected() {
             showToast('♻️', `Recovered ${recovered} unsynced item(s) from this device — re-saving to Drive.`);
             triggerAutoSave();
         }
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentData)); } catch(e) {}
+        await saveLocalBackup(currentData);
         updateConsolidatedBadge();
     }
 
@@ -4585,7 +5144,7 @@ async function postLoginInit() {
                 if (data && data.main_items) {
                     currentData = data;
                     if (!currentData.users) currentData.users = [];
-                    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentData)); } catch(e) {}
+                    await saveLocalBackup(currentData);
                     buildConsolidatedView();
                     updateConsolidatedBadge();
                     setStatus('✅ Drive synced', 'text-green-400');
@@ -4600,8 +5159,20 @@ async function init() {
     // Re-check the nav lock on every keystroke in the editor (delegated — survives re-renders)
     document.getElementById('sheet1-view')?.addEventListener('input', () => { applyEditingNavLock(); scheduleDraftSave(); });
 
-    // Load from localStorage immediately
-    loadFromLocalStorage();
+    // Load the local backup immediately (IndexedDB, with a one-time migration from any old
+    // localStorage copy — see loadFromLocalStorage).
+    await loadFromLocalStorage();
+
+    // Keeps the in-progress editor draft syncing to its own small Drive file every second or
+    // so while there are unsynced edits — separate from the big 258MB main file, and separate
+    // from the instant local (IndexedDB) draft save that already happens on every keystroke.
+    startDraftDriveSyncLoop();
+
+    // Keeps the Google Drive sign-in topped off every few minutes for as long as the app is
+    // open, instead of relying on a single ~55-minute timer that a background tab could delay
+    // past the point the token actually expires. This is the fix for needing to sign in again
+    // partway through an hours-long editing session.
+    startTokenKeepAliveLoop();
 
     // Try silent Drive reconnect
     if (GDRIVE_CLIENT_ID) {
