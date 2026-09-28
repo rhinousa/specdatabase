@@ -149,6 +149,19 @@
     <span id="unsynced-banner-msg">⚠️ Could not save to Drive — your last change is only on this device. Retrying automatically…</span>
     <button onclick="connectGDrive('reconnect')" class="bg-black text-yellow-300 px-3 py-1 rounded-md cursor-pointer hover:opacity-80">Sign in to Drive now</button>
 </div>
+<!-- Reconnect overlay — shown only when a real sync attempt has actually failed and confirmed
+     Drive needs a fresh sign-in, never speculatively. Unlike Google's own account-chooser
+     popup, this is a clear, expected full-screen state (not a small window interrupting
+     mid-work), and — critically — it does NOT touch currentData or editorItem, so whatever
+     was open stays exactly as it was underneath. Signing in here uses 'reconnect' mode only. -->
+<div id="reconnect-overlay" style="display:none;position:fixed;inset:0;z-index:99998;background:rgba(3,7,18,0.97);align-items:center;justify-content:center;font-family:Arial,sans-serif" class="flex-col">
+    <div style="max-width:420px;text-align:center;padding:32px" class="bg-gray-900 border border-gray-700 rounded-2xl">
+        <div style="font-size:40px;margin-bottom:12px">🔒</div>
+        <h2 class="text-white font-black text-lg mb-2">Google Drive session expired</h2>
+        <p class="text-gray-400 text-xs mb-5 leading-relaxed">Nothing is lost — your work is already saved on this device. Sign in again to reconnect and keep syncing to Drive.</p>
+        <button id="reconnect-overlay-btn" onclick="reconnectFromOverlay()" class="bg-pantone text-black font-black text-sm px-6 py-2.5 rounded-xl cursor-pointer hover:opacity-90 shadow-lg">Sign in to continue</button>
+    </div>
+</div>
 <!-- GOOGLE SIGN-IN SCREEN -->
 <div id="login-screen" style="position:fixed;inset:0;z-index:99999;background:#0a0f1a;display:flex;align-items:center;justify-content:center;font-family:Arial,sans-serif">
     <div style="width:380px;background:#111827;border:1px solid #1e293b;border-radius:16px;padding:36px;box-shadow:0 25px 60px rgba(0,0,0,0.6);text-align:center">
@@ -509,6 +522,15 @@ const giftBoxPhotoKeys = [
     { key:'gb_left_photo', label:'Left View' },
     { key:'gb_right_photo', label:'Right View' }
 ];
+// Inner Case — same shape as Master Carton (some products are packed in an inner case
+// before going into the outer master carton; many products skip this entirely, so unlike
+// Master Carton/Gift Box, this block starts hidden by default).
+const innerCasePhotoKeys = [
+    { key:'ic_iso_photo', label:'Isometric View' },
+    { key:'ic_front_photo', label:'Front View' },
+    { key:'ic_top_photo', label:'Top View' },
+    { key:'ic_left_right_photo', label:'Left / Right View' }
+];
 
 // ============================================================
 // BLANK ITEM FACTORY
@@ -518,10 +540,15 @@ function createBlankItem(id) {
         id, description:"", sku_no:"", priority_sku:"", date:"", asin:"", upc:"", gtin:"", photo_remarks:"",
         package_contents:[],
         product_photo:"", pkg_content_photo:"", front_photo:"", rear_photo:"", left_photo:"", right_photo:"", top_photo:"", bottom_photo:"", drawing_photo:"", drawings:[],
+        show_master_carton:true,
         mc_l:"", mc_w:"", mc_h:"", mc_weight:"", mc_qty:"", mc_qty_uom:"", mc_remarks:"", show_mc_remarks:true,
         mc_iso_photo:"", mc_front_photo:"", mc_top_photo:"", mc_left_right_photo:"",
+        show_gift_box:true,
         gb_l:"", gb_w:"", gb_h:"", gb_weight:"", gb_qty:"", gb_artwork:"", gb_remarks:"", show_gb_artwork:true, show_gb_remarks:true,
         gb_rear_photo:"", gb_front_photo:"", gb_top_photo:"", gb_bottom_photo:"", gb_left_photo:"", gb_right_photo:"",
+        show_inner_case:false,
+        ic_l:"", ic_w:"", ic_h:"", ic_weight:"", ic_qty:"", ic_qty_uom:"", ic_remarks:"", show_ic_remarks:true,
+        ic_iso_photo:"", ic_front_photo:"", ic_top_photo:"", ic_left_right_photo:"",
         show_compliance:false, show_ctq:false, show_drawing:false, show_marketing:false, show_other_components:false, show_authorization:false,
         instructions_photo:"",
         features:[{ id:"1", text:"", photo:"" }],
@@ -1777,6 +1804,7 @@ async function connectGDrive(mode = 'login') {
                     if (mode === 'reconnect') {
                         // Token restored — do NOT touch currentData/editorItem or navigate
                         // anywhere. Just flush whatever save was waiting on this connection.
+                        hideReconnectOverlay();
                         showToast('✅', 'Reconnected to Drive — saving your work now…');
                         await saveData();
                         return;
@@ -1835,7 +1863,12 @@ async function gdriveFetch(url, method = 'GET', body = null, isUpload = false, i
                     return gdriveFetch(url, method, body, isUpload, true);
                 }
             }
+            // Confirmed, not speculative: a silent refresh was already attempted just above
+            // and it failed too — this is the exact, real moment reconnecting is genuinely
+            // needed, so (and only so) the reconnect overlay appears here rather than on any
+            // kind of timer or guess.
             gdriveToken = null; gdriveEnabled = false; sessionStorage.removeItem('gdrive_token'); updateDriveButtonState();
+            showReconnectOverlay();
         }
         throw new Error(`Drive ${res.status}: ${errText.substring(0, 200)}`);
     }
@@ -2183,6 +2216,11 @@ async function loadFromDriveFile(isRetry = false) {
                 const reconnected = await silentReconnectGDrive().catch(() => false);
                 if (reconnected) return loadFromDriveFile(true);
             }
+            if (res.status === 401) {
+                // Confirmed, not speculative — the silent retry above already failed.
+                gdriveToken = null; gdriveEnabled = false; sessionStorage.removeItem('gdrive_token'); updateDriveButtonState();
+                showReconnectOverlay();
+            }
             console.error('Drive load failed:', res.status, await res.text().catch(()=>''));
             setStatus('❌ Could not load Drive data (status ' + res.status + ')', 'text-red-400');
             return null;
@@ -2251,6 +2289,35 @@ function hideUnsyncedBanner() {
     unsyncedRetryTimer = null;
     const banner = document.getElementById('unsynced-banner');
     if (banner) banner.style.display = 'none';
+}
+
+// ── Reconnect overlay ──────────────────────────────────────
+// Shown only when a real sync attempt has already failed and the automatic silent retry
+// (built into gdriveFetch / loadFromDriveFile / saveData) also failed to fix it — never
+// speculatively, and never on a timer. This directly replaces the earlier approach of
+// proactively polling for a token refresh every few minutes: in a browser signed into
+// multiple Google accounts (or with third-party cookies blocked), that "silent" check can't
+// actually stay silent — it surfaces Google's own account-chooser window, which was
+// interrupting work far more often than the old, rarer approach ever did. Now, reconnecting
+// is purely reactive: it only happens at the exact moment something genuinely needs it.
+function showReconnectOverlay() {
+    const el = document.getElementById('reconnect-overlay');
+    if (el) el.style.display = 'flex';
+}
+
+function hideReconnectOverlay() {
+    const el = document.getElementById('reconnect-overlay');
+    if (el) el.style.display = 'none';
+}
+
+async function reconnectFromOverlay() {
+    const btn = document.getElementById('reconnect-overlay-btn');
+    if (btn) { btn.textContent = 'Connecting…'; btn.disabled = true; }
+    await connectGDrive('reconnect');
+    if (btn) { btn.textContent = 'Sign in to continue'; btn.disabled = false; }
+    // connectGDrive('reconnect') never touches currentData/editorItem — whatever was open is
+    // still exactly as it was. If it actually succeeded, gdriveEnabled will now be true.
+    if (gdriveEnabled && gdriveToken) hideReconnectOverlay();
 }
 
 // Folds any items into `target` that exist in `source` but not in `target`
@@ -2803,11 +2870,20 @@ function buildReportHTML(item) {
                 ${sub.show_elevation_angle ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Elevation/Angle</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.elevation_angle||'—'}</td></tr>` : ''}
             </table>`;
         }
+        // Each measurement (the base one and every extra) now carries its OWN resolved
+        // show_* flags rather than sharing the component's single set — a row still only
+        // appears at all if at least one measurement in the comparison has that parameter
+        // turned on, but a measurement that has it turned off shows a dash in its own column
+        // instead of a value, exactly matching what the editor now lets you configure per
+        // measurement (see extraFlag()).
         const sets = [
-            { name: sub.default_measurement_name || 'Default', l_cm: sub.dim_l_cm, l_in: sub.dim_l_in, w_cm: sub.dim_w_cm, w_in: sub.dim_w_in, h_cm: sub.dim_h_cm, h_in: sub.dim_h_in, weight_kg: sub.weight_kg, volume_oz_l: sub.volume_oz_l, thickness_cm: sub.thickness_cm, thickness_in: sub.thickness_in, circumference_cm: sub.circumference_cm, circumference_in: sub.circumference_in, elevation_angle: sub.elevation_angle },
-            ...extras.map(ex => ({ name: ex.name || 'Unnamed', l_cm: ex.dim_l_cm, l_in: ex.dim_l_in, w_cm: ex.dim_w_cm, w_in: ex.dim_w_in, h_cm: ex.dim_h_cm, h_in: ex.dim_h_in, weight_kg: ex.weight_kg, volume_oz_l: ex.volume_oz_l, thickness_cm: ex.thickness_cm, thickness_in: ex.thickness_in, circumference_cm: ex.circumference_cm, circumference_in: ex.circumference_in, elevation_angle: ex.elevation_angle }))
+            { name: sub.default_measurement_name || 'Default', l_cm: sub.dim_l_cm, l_in: sub.dim_l_in, w_cm: sub.dim_w_cm, w_in: sub.dim_w_in, h_cm: sub.dim_h_cm, h_in: sub.dim_h_in, weight_kg: sub.weight_kg, volume_oz_l: sub.volume_oz_l, thickness_cm: sub.thickness_cm, thickness_in: sub.thickness_in, circumference_cm: sub.circumference_cm, circumference_in: sub.circumference_in, elevation_angle: sub.elevation_angle,
+              show_length: sub.show_length!==false, show_width: sub.show_width!==false, show_height: sub.show_height!==false, show_weight: sub.show_weight!==false, show_thickness: !!sub.show_thickness, show_volume: !!sub.show_volume, show_circumference: !!sub.show_circumference, show_elevation_angle: !!sub.show_elevation_angle },
+            ...extras.map(ex => ({ name: ex.name || 'Unnamed', l_cm: ex.dim_l_cm, l_in: ex.dim_l_in, w_cm: ex.dim_w_cm, w_in: ex.dim_w_in, h_cm: ex.dim_h_cm, h_in: ex.dim_h_in, weight_kg: ex.weight_kg, volume_oz_l: ex.volume_oz_l, thickness_cm: ex.thickness_cm, thickness_in: ex.thickness_in, circumference_cm: ex.circumference_cm, circumference_in: ex.circumference_in, elevation_angle: ex.elevation_angle,
+              show_length: extraFlag(sub,ex,'show_length',true), show_width: extraFlag(sub,ex,'show_width',true), show_height: extraFlag(sub,ex,'show_height',true), show_weight: extraFlag(sub,ex,'show_weight',true), show_thickness: extraFlag(sub,ex,'show_thickness',false), show_volume: extraFlag(sub,ex,'show_volume',false), show_circumference: extraFlag(sub,ex,'show_circumference',false), show_elevation_angle: extraFlag(sub,ex,'show_elevation_angle',false) }))
         ];
         const cell = (v) => `<td style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${v||'—'}</td>`;
+        const blank = () => `<td style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">—</td>`;
         return `
         <table style="width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed">
             <tr style="background:#f3f4f6;font-weight:700;color:#374151">
@@ -2817,14 +2893,14 @@ function buildReportHTML(item) {
             <tr style="background:#f3f4f6;font-weight:700;color:#374151">
                 ${sets.map(() => `<td style="padding:3px 6px;border:1px solid #d1d5db;text-align:center">CM</td><td style="padding:3px 6px;border:1px solid #d1d5db;text-align:center">IN</td>`).join('')}
             </tr>
-            ${sub.show_length!==false ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Length (L)</td>${sets.map(s=>cell(s.l_cm)+cell(s.l_in)).join('')}</tr>` : ''}
-            ${sub.show_width!==false ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Width (W)</td>${sets.map(s=>cell(s.w_cm)+cell(s.w_in)).join('')}</tr>` : ''}
-            ${sub.show_height!==false ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Height (H)</td>${sets.map(s=>cell(s.h_cm)+cell(s.h_in)).join('')}</tr>` : ''}
-            ${sub.show_thickness ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Thickness</td>${sets.map(s=>cell(s.thickness_cm)+cell(s.thickness_in)).join('')}</tr>` : ''}
-            ${sub.show_weight!==false ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.weight_kg||'—'} kg ${!isNaN(parseFloat(s.weight_kg))?'('+(parseFloat(s.weight_kg)*2.205).toFixed(2)+' lbs)':''}</td>`).join('')}</tr>` : ''}
-            ${sub.show_volume ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.volume_oz_l||'—'}</td>`).join('')}</tr>` : ''}
-            ${sub.show_circumference ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Diameter</td>${sets.map(s=>cell(s.circumference_cm)+cell(s.circumference_in)).join('')}</tr>` : ''}
-            ${sub.show_elevation_angle ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Elevation/Angle</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.elevation_angle||'—'}</td>`).join('')}</tr>` : ''}
+            ${sets.some(s=>s.show_length) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Length (L)</td>${sets.map(s=>s.show_length?(cell(s.l_cm)+cell(s.l_in)):(blank()+blank())).join('')}</tr>` : ''}
+            ${sets.some(s=>s.show_width) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Width (W)</td>${sets.map(s=>s.show_width?(cell(s.w_cm)+cell(s.w_in)):(blank()+blank())).join('')}</tr>` : ''}
+            ${sets.some(s=>s.show_height) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Height (H)</td>${sets.map(s=>s.show_height?(cell(s.h_cm)+cell(s.h_in)):(blank()+blank())).join('')}</tr>` : ''}
+            ${sets.some(s=>s.show_thickness) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Thickness</td>${sets.map(s=>s.show_thickness?(cell(s.thickness_cm)+cell(s.thickness_in)):(blank()+blank())).join('')}</tr>` : ''}
+            ${sets.some(s=>s.show_weight) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.show_weight ? (s.weight_kg||'—') + ' kg ' + (!isNaN(parseFloat(s.weight_kg))?'('+(parseFloat(s.weight_kg)*2.205).toFixed(2)+' lbs)':'') : '—'}</td>`).join('')}</tr>` : ''}
+            ${sets.some(s=>s.show_volume) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.show_volume ? (s.volume_oz_l||'—') : '—'}</td>`).join('')}</tr>` : ''}
+            ${sets.some(s=>s.show_circumference) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Diameter</td>${sets.map(s=>s.show_circumference?(cell(s.circumference_cm)+cell(s.circumference_in)):(blank()+blank())).join('')}</tr>` : ''}
+            ${sets.some(s=>s.show_elevation_angle) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Elevation/Angle</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.show_elevation_angle ? (s.elevation_angle||'—') : '—'}</td>`).join('')}</tr>` : ''}
         </table>`;
     };
 
@@ -3013,7 +3089,7 @@ function buildReportHTML(item) {
             <colgroup>
                 <col style="width:13%"><col style="width:23%">
                 <col style="width:8%"><col style="width:13%">
-                <col style="width:14%"><col style="width:29%">
+                <col style="width:18%"><col style="width:25%">
             </colgroup>
 
             <!-- HEADER -->
@@ -3107,6 +3183,7 @@ function buildReportHTML(item) {
         </div>
     </div>
 
+    ${item.show_master_carton!==false ? `
     <div class="report-page">
     <div class="page-label">${pageLabel()}</div>
     <div style="background:#fff;padding:20px">
@@ -3138,8 +3215,9 @@ function buildReportHTML(item) {
         <div style="flex:1 0 auto"></div>
         <img src="${REPORT_LETTERHEAD_FOOTER}" style="width:calc(100% + 60px);max-width:none;display:block;margin:14px -30px -20px -30px">
         </div>
-    </div>
+    </div>` : ''}
 
+    ${item.show_gift_box!==false ? `
     <div class="report-page">
     <div class="page-label">${pageLabel()}</div>
     <div style="background:#fff;padding:20px">
@@ -3173,7 +3251,41 @@ function buildReportHTML(item) {
         <div style="flex:1 0 auto"></div>
         <img src="${REPORT_LETTERHEAD_FOOTER}" style="width:calc(100% + 60px);max-width:none;display:block;margin:14px -30px -20px -30px">
         </div>
-    </div>
+    </div>` : ''}
+
+    ${item.show_inner_case ? `
+    <div class="report-page">
+    <div class="page-label">${pageLabel()}</div>
+    <div style="background:#fff;padding:20px">
+        <img src="${REPORT_LETTERHEAD_HEADER}" style="width:calc(100% + 60px);max-width:none;display:block;margin:-20px -30px 14px -30px">
+        <table style="width:100%;border-collapse:collapse;border:1px solid #9ca3af;table-layout:fixed">
+
+            <!-- INNER CASE -->
+            <tr style="background:#fce7f3"><td colspan="6" style="padding:8px;border:1px solid #9ca3af;text-align:center;font-weight:900;font-size:11px;text-transform:uppercase;color:#9d174d">INNER CASE PACKAGING SPECIFICATIONS</td></tr>
+            <tr>
+                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Case Dim:</td>
+                <td colspan="3" style="padding:6px 10px;border:1px solid #9ca3af">
+                    L: ${item.ic_l||'—'} cm ${item.ic_l?'('+(parseFloat(item.ic_l)/2.54).toFixed(2)+' inch)':''} &nbsp;|&nbsp;
+                    W: ${item.ic_w||'—'} cm ${item.ic_w?'('+(parseFloat(item.ic_w)/2.54).toFixed(2)+' inch)':''} &nbsp;|&nbsp;
+                    H: ${item.ic_h||'—'} cm ${item.ic_h?'('+(parseFloat(item.ic_h)/2.54).toFixed(2)+' inch)':''}
+                </td>
+                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Gross Weight:</td>
+                <td style="padding:6px 10px;border:1px solid #9ca3af">${item.ic_weight||'—'} kg ${!isNaN(parseFloat(item.ic_weight))?'('+(parseFloat(item.ic_weight)*2.205).toFixed(2)+' lbs)':''}</td>
+            </tr>
+            <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Qty per Case:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af">${item.ic_qty||'—'}${item.ic_qty_uom?' '+item.ic_qty_uom:''}</td></tr>
+            ${item.show_ic_remarks!==false ? `<tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Case Remarks:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af;font-style:italic">${item.ic_remarks||'—'}</td></tr>` : ''}
+            <tr>
+                <td colspan="6" style="padding:16px;border:1px solid #9ca3af">
+                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px">
+                        ${innerCasePhotoKeys.map(p=>photoBox(item[p.key], p.label)).join('')}
+                    </div>
+                </td>
+            </tr>
+        </table>
+        <div style="flex:1 0 auto"></div>
+        <img src="${REPORT_LETTERHEAD_FOOTER}" style="width:calc(100% + 60px);max-width:none;display:block;margin:14px -30px -20px -30px">
+        </div>
+    </div>` : ''}
 
     ${buildComponentPages()}
 
@@ -3318,6 +3430,24 @@ function buildItemFormHTML(item, mIdx, isEditor) {
             <button onclick="editorToggleSection('show_authorization')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-yellow-400 cursor-pointer">
                 ${item.show_authorization ? '[−] Hide Authorization' : '[+] Authorization & Sign-Off'}
             </button>
+            <div class="flex items-center gap-1">
+                <button onclick="editorToggleItemParam('show_master_carton',true)" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-yellow-500 cursor-pointer">
+                    ${item.show_master_carton!==false ? '[−] Hide Master Carton' : '[+] Outer Master Carton Packaging'}
+                </button>
+                ${item.show_master_carton!==false ? `<button onclick="scrollToSection('section-master-carton')" title="Jump to this section" class="px-2 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 text-yellow-500 cursor-pointer">⇲</button>` : ''}
+            </div>
+            <div class="flex items-center gap-1">
+                <button onclick="editorToggleItemParam('show_gift_box',true)" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-blue-400 cursor-pointer">
+                    ${item.show_gift_box!==false ? '[−] Hide Gift Box' : '[+] Product Packaging (Gift Box)'}
+                </button>
+                ${item.show_gift_box!==false ? `<button onclick="scrollToSection('section-gift-box')" title="Jump to this section" class="px-2 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 text-blue-400 cursor-pointer">⇲</button>` : ''}
+            </div>
+            <div class="flex items-center gap-1">
+                <button onclick="editorToggleSection('show_inner_case')" class="px-3 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 font-bold text-pink-400 cursor-pointer">
+                    ${item.show_inner_case ? '[−] Hide Inner Case' : '[+] Inner Case Packaging'}
+                </button>
+                ${item.show_inner_case ? `<button onclick="scrollToSection('section-inner-case')" title="Jump to this section" class="px-2 py-1.5 rounded bg-gray-950 hover:bg-gray-800 border border-gray-800 text-pink-400 cursor-pointer">⇲</button>` : ''}
+            </div>
         </div>
 
         <!-- Identity -->
@@ -3385,6 +3515,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
             </div>
         </div>
 
+        ${item.show_master_carton!==false ? `
         <!-- Master Carton -->
         <div id="section-master-carton" class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
             <div class="text-[11px] font-black text-yellow-500 uppercase tracking-widest">Outer Master Carton Packaging</div>
@@ -3413,8 +3544,9 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                     ${item[p.key]?`<button onclick="deletePhoto('main','${p.key}')" class="text-[8px] text-red-400 hover:text-red-300 cursor-pointer font-bold">🗑 Delete</button>`:''}
                 </div>`).join('')}
             </div>
-        </div>
+        </div>` : ''}
 
+        ${item.show_gift_box!==false ? `
         <!-- Gift Box -->
         <div id="section-gift-box" class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
             <div class="text-[11px] font-black text-blue-400 uppercase tracking-widest">Product Packaging (Gift Box)</div>
@@ -3446,7 +3578,38 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                     ${item[p.key]?`<button onclick="deletePhoto('main','${p.key}')" class="text-[8px] text-red-400 hover:text-red-300 cursor-pointer font-bold">🗑 Delete</button>`:''}
                 </div>`).join('')}
             </div>
-        </div>
+        </div>` : ''}
+
+        ${item.show_inner_case ? `
+        <!-- Inner Case -->
+        <div id="section-inner-case" class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+            <div class="text-[11px] font-black text-pink-400 uppercase tracking-widest">Inner Case Packaging</div>
+            <div class="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
+                <div><label class="text-gray-400 block mb-1 font-bold">L (CM)</label><input type="text" value="${item.ic_l||''}" oninput="${dataRef}.ic_l=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.ic_l ? (parseFloat(item.ic_l)/2.54).toFixed(2)+' inch' : ''}</p></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">W (CM)</label><input type="text" value="${item.ic_w||''}" oninput="${dataRef}.ic_w=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.ic_w ? (parseFloat(item.ic_w)/2.54).toFixed(2)+' inch' : ''}</p></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">H (CM)</label><input type="text" value="${item.ic_h||''}" oninput="${dataRef}.ic_h=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${item.ic_h ? (parseFloat(item.ic_h)/2.54).toFixed(2)+' inch' : ''}</p></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">Weight (KG)</label><input type="text" value="${item.ic_weight||''}" oninput="${dataRef}.ic_weight=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"><p class="text-[9px] text-gray-600 mt-0.5">${!isNaN(parseFloat(item.ic_weight)) ? (parseFloat(item.ic_weight)*2.205).toFixed(2)+' lbs' : ''}</p></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">Qty/Case</label><input type="text" value="${item.ic_qty||''}" oninput="${dataRef}.ic_qty=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
+                <div><label class="text-gray-400 block mb-1 font-bold">UoM</label><input type="text" value="${item.ic_qty_uom||''}" oninput="${dataRef}.ic_qty_uom=this.value" placeholder="e.g. PC, SET" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
+            </div>
+            <div>
+                <button onclick="editorToggleItemParam('show_ic_remarks',true)" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${item.show_ic_remarks!==false?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${item.show_ic_remarks!==false?'− Hide':'+ Add'} Case Remarks</button>
+            </div>
+            ${item.show_ic_remarks!==false ? `<div class="grid grid-cols-1 gap-3 text-xs"><div><label class="text-gray-400 block mb-1 font-bold">Case Remarks</label><input type="text" value="${item.ic_remarks||''}" oninput="${dataRef}.ic_remarks=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div></div>` : ''}
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-[10px]">
+                ${innerCasePhotoKeys.map(p=>`
+                <div class="relative flex flex-col items-center gap-1.5">
+                    <div tabindex="0" onclick="setActiveTarget('main',${mIdx},'${p.key}')" class="paste-target bg-gray-950 border-2 border-gray-800 p-2 rounded flex flex-col items-center gap-1.5 focus:outline-none cursor-pointer transition w-full">
+                        <span class="text-gray-500 font-bold uppercase tracking-wide text-[9px]">${p.label}</span>
+                        <div class="w-32 h-32 rounded border border-gray-800 bg-gray-900 overflow-hidden flex items-center justify-center">
+                            ${item[p.key]?`<img src="${item[p.key]}" class="w-full h-full object-cover">`:'<span class="text-gray-600 text-[9px]">📋 Paste</span>'}
+                        </div>
+                    </div>
+                    <button type="button" onclick="triggerPhotoUpload('main',${mIdx},'${p.key}')" class="text-[8px] text-gray-400 hover:text-pantone cursor-pointer font-bold">📤 Upload</button>
+                    ${item[p.key]?`<button onclick="deletePhoto('main','${p.key}')" class="text-[8px] text-red-400 hover:text-red-300 cursor-pointer font-bold">🗑 Delete</button>`:''}
+                </div>`).join('')}
+            </div>
+        </div>` : ''}
 
         <!-- Components -->
         <div id="section-components" class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
@@ -3549,34 +3712,47 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                         <input type="text" value="${ex.name||''}" oninput="${dataRef}.components[${sIdx}].extra_measurements[${exIdx}].name=this.value" placeholder="Name this measurement (e.g. Item2)" class="flex-1 bg-gray-950 rounded p-1.5 text-white font-bold border border-gray-800 focus:outline-none focus-pantone">
                         <button onclick="editorDeleteMeasurement(${sIdx},${exIdx})" class="text-gray-500 hover:text-red-400 cursor-pointer shrink-0 whitespace-nowrap">Remove ✕</button>
                     </div>
-                    ${(sub.show_length!==false || sub.show_width!==false || sub.show_height!==false || sub.show_weight!==false) ? `
-                    <div class="grid grid-cols-4 gap-3">
-                        ${sub.show_length!==false ? `<div><label class="text-gray-400 font-bold block mb-0.5">L (CM)</label><input type="text" value="${ex.dim_l_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'l',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>` : ''}
-                        ${sub.show_width!==false ? `<div><label class="text-gray-400 font-bold block mb-0.5">W (CM)</label><input type="text" value="${ex.dim_w_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'w',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>` : ''}
-                        ${sub.show_height!==false ? `<div><label class="text-gray-400 font-bold block mb-0.5">H (CM)</label><input type="text" value="${ex.dim_h_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'h',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>` : ''}
-                        ${sub.show_weight!==false ? `<div><label class="text-gray-400 font-bold block mb-0.5">Weight (KG)</label><input type="text" value="${ex.weight_kg||''}" oninput="${dataRef}.components[${sIdx}].extra_measurements[${exIdx}].weight_kg=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"><p class="text-[9px] text-gray-600 mt-0.5 text-center">${!isNaN(parseFloat(ex.weight_kg))?(parseFloat(ex.weight_kg)*2.205).toFixed(2)+' lbs':''}</p></div>` : ''}
+                    <!-- Each measurement has its OWN independent add/hide toggles — hiding a
+                         parameter here does not affect the measurement above, or any other
+                         measurement, and vice versa. -->
+                    <div class="flex flex-wrap gap-2 pb-2 border-b border-gray-800">
+                        <button onclick="editorToggleExtraParam(${sIdx},${exIdx},'show_length',true)" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${extraFlag(sub,ex,'show_length',true)?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${extraFlag(sub,ex,'show_length',true)?'− Hide':'+ Add'} Length</button>
+                        <button onclick="editorToggleExtraParam(${sIdx},${exIdx},'show_width',true)" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${extraFlag(sub,ex,'show_width',true)?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${extraFlag(sub,ex,'show_width',true)?'− Hide':'+ Add'} Width</button>
+                        <button onclick="editorToggleExtraParam(${sIdx},${exIdx},'show_height',true)" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${extraFlag(sub,ex,'show_height',true)?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${extraFlag(sub,ex,'show_height',true)?'− Hide':'+ Add'} Height</button>
+                        <button onclick="editorToggleExtraParam(${sIdx},${exIdx},'show_weight',true)" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${extraFlag(sub,ex,'show_weight',true)?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${extraFlag(sub,ex,'show_weight',true)?'− Hide':'+ Add'} Weight</button>
+                        <button onclick="editorToggleExtraParam(${sIdx},${exIdx},'show_thickness')" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${extraFlag(sub,ex,'show_thickness',false)?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${extraFlag(sub,ex,'show_thickness',false)?'− Hide':'+ Add'} Thickness</button>
+                        <button onclick="editorToggleExtraParam(${sIdx},${exIdx},'show_volume')" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${extraFlag(sub,ex,'show_volume',false)?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${extraFlag(sub,ex,'show_volume',false)?'− Hide':'+ Add'} Volume</button>
+                        <button onclick="editorToggleExtraParam(${sIdx},${exIdx},'show_circumference')" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${extraFlag(sub,ex,'show_circumference',false)?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${extraFlag(sub,ex,'show_circumference',false)?'− Hide':'+ Add'} Diameter</button>
+                        <button onclick="editorToggleExtraParam(${sIdx},${exIdx},'show_elevation_angle')" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${extraFlag(sub,ex,'show_elevation_angle',false)?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${extraFlag(sub,ex,'show_elevation_angle',false)?'− Hide':'+ Add'} Elevation/Angle</button>
                     </div>
-                    ${(sub.show_length!==false || sub.show_width!==false || sub.show_height!==false) ? `
+                    ${(extraFlag(sub,ex,'show_length',true) || extraFlag(sub,ex,'show_width',true) || extraFlag(sub,ex,'show_height',true) || extraFlag(sub,ex,'show_weight',true)) ? `
+                    <div class="grid grid-cols-4 gap-3">
+                        ${extraFlag(sub,ex,'show_length',true) ? `<div><label class="text-gray-400 font-bold block mb-0.5">L (CM)</label><input type="text" value="${ex.dim_l_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'l',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>` : ''}
+                        ${extraFlag(sub,ex,'show_width',true) ? `<div><label class="text-gray-400 font-bold block mb-0.5">W (CM)</label><input type="text" value="${ex.dim_w_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'w',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>` : ''}
+                        ${extraFlag(sub,ex,'show_height',true) ? `<div><label class="text-gray-400 font-bold block mb-0.5">H (CM)</label><input type="text" value="${ex.dim_h_cm||''}" oninput="editorHandleExtraConversion(${sIdx},${exIdx},'h',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>` : ''}
+                        ${extraFlag(sub,ex,'show_weight',true) ? `<div><label class="text-gray-400 font-bold block mb-0.5">Weight (KG)</label><input type="text" value="${ex.weight_kg||''}" oninput="${dataRef}.components[${sIdx}].extra_measurements[${exIdx}].weight_kg=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"><p class="text-[9px] text-gray-600 mt-0.5 text-center">${!isNaN(parseFloat(ex.weight_kg))?(parseFloat(ex.weight_kg)*2.205).toFixed(2)+' lbs':''}</p></div>` : ''}
+                    </div>
+                    ${(extraFlag(sub,ex,'show_length',true) || extraFlag(sub,ex,'show_width',true) || extraFlag(sub,ex,'show_height',true)) ? `
                     <div class="grid grid-cols-3 gap-2 pt-1 border-t border-gray-800 text-[10px] text-gray-400 font-mono">
-                        ${sub.show_length!==false ? `<div>L (in): <input type="text" id="in-l-ex-${sIdx}-${exIdx}" value="${ex.dim_l_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>` : ''}
-                        ${sub.show_width!==false ? `<div>W (in): <input type="text" id="in-w-ex-${sIdx}-${exIdx}" value="${ex.dim_w_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>` : ''}
-                        ${sub.show_height!==false ? `<div>H (in): <input type="text" id="in-h-ex-${sIdx}-${exIdx}" value="${ex.dim_h_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>` : ''}
+                        ${extraFlag(sub,ex,'show_length',true) ? `<div>L (in): <input type="text" id="in-l-ex-${sIdx}-${exIdx}" value="${ex.dim_l_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>` : ''}
+                        ${extraFlag(sub,ex,'show_width',true) ? `<div>W (in): <input type="text" id="in-w-ex-${sIdx}-${exIdx}" value="${ex.dim_w_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>` : ''}
+                        ${extraFlag(sub,ex,'show_height',true) ? `<div>H (in): <input type="text" id="in-h-ex-${sIdx}-${exIdx}" value="${ex.dim_h_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</div>` : ''}
                     </div>` : ''}` : ''}
-                    ${sub.show_thickness ? `
+                    ${extraFlag(sub,ex,'show_thickness',false) ? `
                     <div class="grid grid-cols-2 gap-3 pt-1 border-t border-gray-800">
                         <div><label class="text-gray-400 font-bold block mb-0.5">Thickness (CM)</label><input type="text" value="${ex.thickness_cm||''}" oninput="editorHandleExtraParamConversion(${sIdx},${exIdx},'thickness',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
                         <div class="flex items-end pb-1.5"><span class="text-[10px] text-gray-400 font-mono">Thickness (in): <input type="text" id="in-thickness-ex-${sIdx}-${exIdx}" value="${ex.thickness_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</span></div>
                     </div>` : ''}
-                    ${sub.show_volume ? `
+                    ${extraFlag(sub,ex,'show_volume',false) ? `
                     <div class="grid grid-cols-2 gap-3 pt-1 border-t border-gray-800">
                         <div><label class="text-gray-400 font-bold block mb-0.5">Volume (OZ/L)</label><input type="text" value="${ex.volume_oz_l||''}" oninput="${dataRef}.components[${sIdx}].extra_measurements[${exIdx}].volume_oz_l=this.value" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
                     </div>` : ''}
-                    ${sub.show_circumference ? `
+                    ${extraFlag(sub,ex,'show_circumference',false) ? `
                     <div class="grid grid-cols-2 gap-3 pt-1 border-t border-gray-800">
                         <div><label class="text-gray-400 font-bold block mb-0.5">Diameter (CM)</label><input type="text" value="${ex.circumference_cm||''}" oninput="editorHandleExtraParamConversion(${sIdx},${exIdx},'circumference',this.value)" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
                         <div class="flex items-end pb-1.5"><span class="text-[10px] text-gray-400 font-mono">Diameter (in): <input type="text" id="in-circumference-ex-${sIdx}-${exIdx}" value="${ex.circumference_in||''}" class="bg-transparent text-pantone focus:outline-none w-14" readonly> in</span></div>
                     </div>` : ''}
-                    ${sub.show_elevation_angle ? `
+                    ${extraFlag(sub,ex,'show_elevation_angle',false) ? `
                     <div class="grid grid-cols-2 gap-3 pt-1 border-t border-gray-800">
                         <div><label class="text-gray-400 font-bold block mb-0.5">Elevation / Angle</label><input type="text" value="${ex.elevation_angle||''}" oninput="${dataRef}.components[${sIdx}].extra_measurements[${exIdx}].elevation_angle=this.value" placeholder="e.g. 15°" class="w-full bg-gray-950 rounded p-1.5 text-white text-center border border-gray-800"></div>
                     </div>` : ''}
@@ -3842,10 +4018,39 @@ function editorHandleConversion(sIdx, field, val) {
 // unnamed measurement when there's only one; adding an extra one is what introduces naming
 // (both for the new entry and, via default_measurement_name, for the original one too, so
 // they can be told apart once there's more than one).
+// Resolves which parameters are shown for one specific measurement (either the component's
+// base measurement, treated as `ex` via its own show_* fields directly, or one of its
+// `extra_measurements`). Each measurement's show_* flags are independent once set — hiding
+// Thickness on the first measurement has no effect on the second, and vice versa. For any
+// extra measurement saved before this independence existed (so it has no show_* field of its
+// own yet), this falls back to the parent component's current flag, which is exactly the
+// value it was already effectively using — so nothing that was visible before suddenly
+// disappears. The very first time a measurement's toggle is clicked, it gets its own explicit
+// true/false and becomes independent from then on.
+function extraFlag(sub, ex, key, defaultTrue) {
+    const raw = ex[key];
+    if (raw !== undefined) return defaultTrue ? raw !== false : !!raw;
+    const subRaw = sub[key];
+    return defaultTrue ? subRaw !== false : !!subRaw;
+}
+function editorToggleExtraParam(sIdx, exIdx, key, defaultTrue) {
+    const c = editorItem.components[sIdx];
+    const ex = c.extra_measurements[exIdx];
+    const current = extraFlag(c, ex, key, defaultTrue);
+    ex[key] = !current;
+    renderEditorForm();
+}
 function editorAddMeasurement(sIdx) {
     const c = editorItem.components[sIdx];
     if (!c.extra_measurements) c.extra_measurements = [];
-    c.extra_measurements.push({ name:"", dim_l_cm:"", dim_w_cm:"", dim_h_cm:"", dim_l_in:"", dim_w_in:"", dim_h_in:"", weight_kg:"", volume_oz_l:"", thickness_cm:"", thickness_in:"", circumference_cm:"", circumference_in:"", elevation_angle:"" });
+    // New measurements start matching whichever parameters are currently shown on the base
+    // measurement above — an explicit, independent copy of that starting state, not a link to
+    // it, so hiding/showing something afterward on either one never affects the other.
+    c.extra_measurements.push({
+        name:"", dim_l_cm:"", dim_w_cm:"", dim_h_cm:"", dim_l_in:"", dim_w_in:"", dim_h_in:"", weight_kg:"", volume_oz_l:"", thickness_cm:"", thickness_in:"", circumference_cm:"", circumference_in:"", elevation_angle:"",
+        show_length: c.show_length!==false, show_width: c.show_width!==false, show_height: c.show_height!==false, show_weight: c.show_weight!==false,
+        show_thickness: !!c.show_thickness, show_volume: !!c.show_volume, show_circumference: !!c.show_circumference, show_elevation_angle: !!c.show_elevation_angle
+    });
     renderEditorForm();
 }
 function editorDeleteMeasurement(sIdx, exIdx) {
@@ -3917,8 +4122,9 @@ function scrollToSection(sectionId) {
 const EDITOR_QUICKNAV_SECTIONS = [
     { key: null,                     id: 'section-identity',          label: 'Product Identity',           color: 'text-gray-300' },
     { key: null,                     id: 'section-photos',            label: 'Multi-Angle Photos',         color: 'text-gray-300' },
-    { key: null,                     id: 'section-master-carton',     label: 'Outer Master Carton',        color: 'text-yellow-500' },
-    { key: null,                     id: 'section-gift-box',          label: 'Product Packaging (Gift Box)', color: 'text-blue-400' },
+    { key: 'show_master_carton',     id: 'section-master-carton',     label: 'Outer Master Carton',        color: 'text-yellow-500' },
+    { key: 'show_gift_box',          id: 'section-gift-box',          label: 'Product Packaging (Gift Box)', color: 'text-blue-400' },
+    { key: 'show_inner_case',        id: 'section-inner-case',        label: 'Inner Case Packaging',       color: 'text-pink-400' },
     { key: null,                     id: 'section-components',        label: 'Component Details',          color: 'text-gray-300' },
     { key: 'show_marketing',        id: 'section-marketing',         label: 'Marketing & Documentation', color: 'text-teal-400' },
     { key: 'show_compliance',       id: 'section-compliance',        label: 'Compliance & Testing',      color: 'text-purple-400' },
@@ -5168,11 +5374,15 @@ async function init() {
     // from the instant local (IndexedDB) draft save that already happens on every keystroke.
     startDraftDriveSyncLoop();
 
-    // Keeps the Google Drive sign-in topped off every few minutes for as long as the app is
-    // open, instead of relying on a single ~55-minute timer that a background tab could delay
-    // past the point the token actually expires. This is the fix for needing to sign in again
-    // partway through an hours-long editing session.
-    startTokenKeepAliveLoop();
+    // NOTE: an earlier version of this proactively polled for a token refresh every few
+    // minutes (startTokenKeepAliveLoop). Removed: in a browser signed into more than one
+    // Google account (or with third-party cookies blocked), that "silent" check can't
+    // actually stay silent — it surfaces Google's own account-chooser popup, which ended up
+    // interrupting work far more often than doing nothing ever did. Reconnecting is now
+    // purely reactive: gdriveFetch / loadFromDriveFile already retry silently the moment an
+    // actual Drive request needs it, and only show the reconnect overlay (see
+    // showReconnectOverlay) if that one confirmed, real attempt also fails — never on a timer,
+    // never speculatively.
 
     // Try silent Drive reconnect
     if (GDRIVE_CLIENT_ID) {
