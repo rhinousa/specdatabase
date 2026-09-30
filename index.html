@@ -2839,11 +2839,15 @@ function wrapPhotoLink(url, innerHtml) {
 
 function buildReportHTML(item) {
     // Reusable photo box — enlarged to fill its cell/column, capped by a generous max-height
-    const photoBox = (src, label='') => `
+    // maxH is smaller (260) for the two 3-row / 6-photo layouts (Multi-Angle, Gift Box) so the
+    // whole grid plus header/footer reliably fits within one Legal-size (1344px) printed page —
+    // at the default 340px those two pages ran long enough to spill their footer onto a second,
+    // otherwise-blank sheet. 4-photo grids (Master Carton, Inner Case) keep the larger default.
+    const photoBox = (src, label='', maxH=340) => `
         <div style="text-align:center;max-width:100%">
             ${label ? `<div style="font-size:10px;font-weight:700;color:#374151;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em">${label}</div>` : ''}
-            <div style="width:100%;min-height:240px;max-height:340px;border:1px solid #d1d5db;border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f9fafb;box-sizing:border-box;padding:8px">
-                ${src ? wrapPhotoLink(src, `<img src="${src}" style="max-width:100%;max-height:320px;object-fit:contain">`) : '<span style="color:#9ca3af;font-size:11px">—</span>'}
+            <div style="width:100%;min-height:${Math.round(maxH*0.7)}px;max-height:${maxH}px;border:1px solid #d1d5db;border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f9fafb;box-sizing:border-box;padding:8px">
+                ${src ? wrapPhotoLink(src, `<img src="${src}" style="max-width:100%;max-height:${maxH-20}px;object-fit:contain">`) : '<span style="color:#9ca3af;font-size:11px">—</span>'}
             </div>
         </div>`;
 
@@ -3161,21 +3165,21 @@ function buildReportHTML(item) {
                 <td colspan="3" style="padding:5px;border:1px solid #9ca3af">REAR VIEW</td>
             </tr>
             <tr>
-                ${['front_photo','rear_photo'].map(k=>`<td colspan="3" style="padding:12px;border:1px solid #9ca3af;text-align:center">${photoBox(item[k])}</td>`).join('')}
+                ${['front_photo','rear_photo'].map(k=>`<td colspan="3" style="padding:8px;border:1px solid #9ca3af;text-align:center">${photoBox(item[k],'',260)}</td>`).join('')}
             </tr>
             <tr style="background:#f3f4f6;text-align:center;font-size:9px;font-weight:700;color:#374151">
                 <td colspan="3" style="padding:5px;border:1px solid #9ca3af">LEFT VIEW</td>
                 <td colspan="3" style="padding:5px;border:1px solid #9ca3af">RIGHT VIEW</td>
             </tr>
             <tr>
-                ${['left_photo','right_photo'].map(k=>`<td colspan="3" style="padding:12px;border:1px solid #9ca3af;text-align:center">${photoBox(item[k])}</td>`).join('')}
+                ${['left_photo','right_photo'].map(k=>`<td colspan="3" style="padding:8px;border:1px solid #9ca3af;text-align:center">${photoBox(item[k],'',260)}</td>`).join('')}
             </tr>
             <tr style="background:#f3f4f6;text-align:center;font-size:9px;font-weight:700;color:#374151">
                 <td colspan="3" style="padding:5px;border:1px solid #9ca3af">TOP VIEW</td>
                 <td colspan="3" style="padding:5px;border:1px solid #9ca3af">BOTTOM VIEW</td>
             </tr>
             <tr>
-                ${['top_photo','bottom_photo'].map(k=>`<td colspan="3" style="padding:12px;border:1px solid #9ca3af;text-align:center">${photoBox(item[k])}</td>`).join('')}
+                ${['top_photo','bottom_photo'].map(k=>`<td colspan="3" style="padding:8px;border:1px solid #9ca3af;text-align:center">${photoBox(item[k],'',260)}</td>`).join('')}
             </tr>
         </table>
         <div style="flex:1 0 auto"></div>
@@ -3275,9 +3279,9 @@ function buildReportHTML(item) {
             </tr>
             ${item.show_gb_remarks!==false ? `<tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Box Remarks:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af;font-style:italic">${item.gb_remarks||'—'}</td></tr>` : ''}
             <tr>
-                <td colspan="6" style="padding:16px;border:1px solid #9ca3af">
-                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px">
-                        ${giftBoxPhotoKeys.map(p=>photoBox(item[p.key], p.label)).join('')}
+                <td colspan="6" style="padding:10px;border:1px solid #9ca3af">
+                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">
+                        ${giftBoxPhotoKeys.map(p=>photoBox(item[p.key], p.label, 260)).join('')}
                     </div>
                 </td>
             </tr>
