@@ -2980,6 +2980,11 @@ function buildReportHTML(item) {
                     <td colspan="${hasTestingStandard ? '2' : '3'}" style="background:#fff;border:1px solid #9ca3af;padding:6px 10px;vertical-align:top;word-wrap:break-word;white-space:pre-wrap">${sub.color||'—'}</td>
                     ${hasTestingStandard ? `<td colspan="2" style="background:#fff;border:1px solid #9ca3af;padding:6px 10px;vertical-align:top;word-wrap:break-word;white-space:pre-wrap">${sub.reliability_test||'—'}</td>` : ''}
                 </tr>
+                ${sub.show_country_of_origin && sub.country_of_origin ? `
+                <tr>
+                    <td colspan="1" style="background:#f3f4f6;border:1px solid #9ca3af;padding:6px 10px;font-size:9px;font-weight:700;color:#374151;text-transform:uppercase">Country of Origin:</td>
+                    <td colspan="5" style="background:#fff;border:1px solid #9ca3af;padding:6px 10px">${sub.country_of_origin}</td>
+                </tr>` : ''}
                 <tr>
                     <td colspan="3" style="padding:12px;border:1px solid #9ca3af;text-align:center;vertical-align:top">
                         <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px">COMPONENT PHOTO</div>
@@ -3691,6 +3696,16 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                     <textarea oninput="${dataRef}.components[${sIdx}].sub_remarks=this.value" rows="2" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone resize-y" style="white-space:pre-wrap;overflow-wrap:break-word" placeholder="Component specific remarks...">${sub.sub_remarks||''}</textarea>
                 </div>
 
+                <!-- Country of Origin — optional, hidden by default until added -->
+                <div>
+                    <button onclick="editorToggleSubParam(${sIdx},'show_country_of_origin')" class="text-[9px] font-bold px-2 py-1 rounded cursor-pointer ${sub.show_country_of_origin?'bg-pantone/20 text-pantone border border-pantone/40':'bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone'}">${sub.show_country_of_origin?'− Hide':'+ Add'} Country of Origin</button>
+                </div>
+                ${sub.show_country_of_origin ? `
+                <div class="text-xs">
+                    <label class="text-gray-400 font-bold block mb-1">Country of Origin</label>
+                    <input type="text" value="${sub.country_of_origin||''}" oninput="${dataRef}.components[${sIdx}].country_of_origin=this.value" placeholder="e.g. China, Vietnam, USA" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone">
+                </div>` : ''}
+
                 <!-- Dimensions -->
                 <div class="bg-gray-900 border border-gray-800 p-3 rounded-lg text-xs space-y-2">
                     <!-- All parameters toggle here — Length/Width/Height/Weight are the defaults
@@ -4199,7 +4214,7 @@ function editorToggleItemParam(key, defaultTrue) {
     renderEditorForm();
 }
 function editorBlankComponent() {
-    return {id:"",description:"",material:"",color:"",reliability_test:"",component_photo:"",sub_remarks:"",dim_l_cm:"",dim_w_cm:"",dim_h_cm:"",weight_kg:"",volume_oz_l:"",dim_l_in:"",dim_w_in:"",dim_h_in:"",default_measurement_name:"",extra_measurements:[],show_length:true,show_width:true,show_height:true,show_weight:true,show_thickness:false,thickness_cm:"",thickness_in:"",show_volume:false,show_circumference:false,circumference_cm:"",circumference_in:"",show_elevation_angle:false,elevation_angle:""};
+    return {id:"",description:"",material:"",color:"",reliability_test:"",component_photo:"",sub_remarks:"",dim_l_cm:"",dim_w_cm:"",dim_h_cm:"",weight_kg:"",volume_oz_l:"",dim_l_in:"",dim_w_in:"",dim_h_in:"",default_measurement_name:"",extra_measurements:[],show_length:true,show_width:true,show_height:true,show_weight:true,show_thickness:false,thickness_cm:"",thickness_in:"",show_volume:false,show_circumference:false,circumference_cm:"",circumference_in:"",show_elevation_angle:false,elevation_angle:"",show_country_of_origin:false,country_of_origin:""};
 }
 // Keeps PART numbers matching each component's actual position in the list (1, 2, 3...)
 // after any add / delete / insert / drag-reorder, so gaps or duplicates never appear.
