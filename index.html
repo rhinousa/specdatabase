@@ -1125,9 +1125,44 @@ async function findDriveLinkBySku(idx) {
 // let the browser's OWN native print engine do it: print CSS below hides the rest of the app
 // and isolates the report, so window.print() renders the exact same layout engine (and colors,
 // oklch included) that already draws the on-screen preview — no separate JS renderer involved.
+// The printed PDF uses a fixed-size physical page (Legal, 816x1344px), but the on-screen
+// preview is just an unconstrained scrolling div — so a page whose real content runs taller
+// than 1344px has nowhere to go on paper but a second, mostly-blank sheet with the footer
+// stranded on it. Rather than guessing/tuning padding per page type (which just moves the
+// problem to whichever page is tallest next), measure every page's TRUE rendered content
+// height right before printing and make the paper exactly as tall as the tallest one needs.
+// That guarantees every section — no matter how many photos or how much text — always prints
+// as exactly one physical page with its footer pinned to the bottom, matching what the
+// preview already shows, instead of silently overflowing onto a hidden extra page.
+function computeReportPrintPageHeight() {
+    const pages = document.querySelectorAll('#pdf-preview-content .report-page > div[style*="background:#fff"]');
+    let maxH = 1344; // Legal-size floor — never go smaller than the standard page
+    pages.forEach(el => { if (el.scrollHeight > maxH) maxH = el.scrollHeight; });
+    return maxH + 4; // small buffer against sub-pixel rounding
+}
+function applyDynamicPrintPageSize(heightPx) {
+    removeDynamicPrintPageSize();
+    const style = document.createElement('style');
+    style.id = 'dynamic-print-page-size';
+    const heightIn = (heightPx / 96).toFixed(3);
+    style.textContent = `
+        @media print {
+            @page { size: 8.5in ${heightIn}in; margin:0; }
+            body.printing-report .report-page > div[style*="background:#fff"] {
+                min-height:${heightPx}px!important; height:${heightPx}px!important;
+            }
+        }`;
+    document.head.appendChild(style);
+}
+function removeDynamicPrintPageSize() {
+    const el = document.getElementById('dynamic-print-page-size');
+    if (el) el.remove();
+}
+
 async function exportToPDF(item) {
     const ok = await requirePassword('exportme', { title: 'Confirm Export', sub: 'Enter the password to export this item to PDF.' });
     if (!ok) return;
+    applyDynamicPrintPageSize(computeReportPrintPageHeight());
     document.body.classList.add('printing-report');
     // Chrome's "Save as PDF" dialog suggests document.title as the default filename —
     // swap it to "SKU — Item Description" for the duration of the print, then restore it after.
@@ -1147,6 +1182,7 @@ async function exportToPDF(item) {
         if (cleaned) return;
         cleaned = true;
         document.body.classList.remove('printing-report');
+        removeDynamicPrintPageSize();
         document.title = originalTitle;
         photoLinkEls.forEach(a => a.removeAttribute('href'));
         window.removeEventListener('afterprint', cleanup);
