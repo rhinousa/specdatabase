@@ -1125,54 +1125,44 @@ async function findDriveLinkBySku(idx) {
 // let the browser's OWN native print engine do it: print CSS below hides the rest of the app
 // and isolates the report, so window.print() renders the exact same layout engine (and colors,
 // oklch included) that already draws the on-screen preview — no separate JS renderer involved.
-// The printed PDF uses fixed-size physical pages, but the on-screen preview is just an
-// unconstrained scrolling div — so a page whose real content runs taller than the standard
-// Legal height (1344px) has nowhere to go on paper but a second, mostly-blank sheet with the
-// footer stranded on it. Forcing every page to share ONE uniform "tallest page" height fixed
-// that overflow, but left short pages (a single small component photo, say) with a big dead
-// gap before the footer — not the compact, one-size-fits-its-own-content look the on-screen
-// preview has. So instead we give EACH physical page its own CSS "named page" (a feature
-// Chrome's print engine supports for exactly this — mixed page sizes within one print job),
-// sized to that specific page's real measured content height (with a Legal-size floor so no
-// page is ever smaller than standard). Short pages stay compact; only a page that genuinely
-// needs more room gets a taller sheet — never a shared one-size-fits-all page count.
-function applyDynamicPerPageSizes() {
+// The printed PDF uses a fixed-size physical page (Legal, 816x1344px), but the on-screen
+// preview is just an unconstrained scrolling div — so a page whose real content runs taller
+// than 1344px has nowhere to go on paper but a second, mostly-blank sheet with the footer
+// stranded on it. Rather than guessing/tuning padding per page type (which just moves the
+// problem to whichever page is tallest next), measure every page's TRUE rendered content
+// height right before printing and make the paper exactly as tall as the tallest one needs.
+// That guarantees every section — no matter how many photos or how much text — always prints
+// as exactly one physical page with its footer pinned to the bottom, matching what the
+// preview already shows, instead of silently overflowing onto a hidden extra page.
+function computeReportPrintPageHeight() {
+    const pages = document.querySelectorAll('#pdf-preview-content .report-page > div[style*="background:#fff"]');
+    let maxH = 1344; // Legal-size floor — never go smaller than the standard page
+    pages.forEach(el => { if (el.scrollHeight > maxH) maxH = el.scrollHeight; });
+    return maxH + 4; // small buffer against sub-pixel rounding
+}
+function applyDynamicPrintPageSize(heightPx) {
     removeDynamicPrintPageSize();
-    const pages = document.querySelectorAll('#pdf-preview-content .report-page');
-    if (!pages.length) return;
-    let cssRules = '';
-    pages.forEach((pageEl, i) => {
-        const sheet = pageEl.querySelector(':scope > div[style*="background:#fff"]');
-        const natural = sheet ? sheet.scrollHeight : 1344;
-        const h = Math.max(1344, natural) + 4; // Legal-size floor + small rounding buffer
-        const heightIn = (h / 96).toFixed(3);
-        const pageName = `rp-page-${i}`;
-        cssRules += `@page ${pageName} { size: 8.5in ${heightIn}in; margin:0; }\n`;
-        pageEl.style.setProperty('page', pageName);
-        if (sheet) {
-            sheet.style.setProperty('min-height', h + 'px', 'important');
-            sheet.style.setProperty('height', h + 'px', 'important');
-        }
-    });
     const style = document.createElement('style');
     style.id = 'dynamic-print-page-size';
-    style.textContent = `@media print { ${cssRules} }`;
+    const heightIn = (heightPx / 96).toFixed(3);
+    style.textContent = `
+        @media print {
+            @page { size: 8.5in ${heightIn}in; margin:0; }
+            body.printing-report .report-page > div[style*="background:#fff"] {
+                min-height:${heightPx}px!important; height:${heightPx}px!important;
+            }
+        }`;
     document.head.appendChild(style);
 }
 function removeDynamicPrintPageSize() {
-    const styleEl = document.getElementById('dynamic-print-page-size');
-    if (styleEl) styleEl.remove();
-    document.querySelectorAll('#pdf-preview-content .report-page').forEach(pageEl => {
-        pageEl.style.removeProperty('page');
-        const sheet = pageEl.querySelector(':scope > div[style*="background:#fff"]');
-        if (sheet) { sheet.style.removeProperty('height'); sheet.style.removeProperty('min-height'); }
-    });
+    const el = document.getElementById('dynamic-print-page-size');
+    if (el) el.remove();
 }
 
 async function exportToPDF(item) {
     const ok = await requirePassword('exportme', { title: 'Confirm Export', sub: 'Enter the password to export this item to PDF.' });
     if (!ok) return;
-    applyDynamicPerPageSizes();
+    applyDynamicPrintPageSize(computeReportPrintPageHeight());
     document.body.classList.add('printing-report');
     // Chrome's "Save as PDF" dialog suggests document.title as the default filename —
     // swap it to "SKU — Item Description" for the duration of the print, then restore it after.
