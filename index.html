@@ -2209,11 +2209,11 @@ async function restoreFromBackup(fileId, whenLabel) {
     }
 }
 
-async function saveToDrive(data) {
+async function saveToDrive(data, forceSnapshot = false) {
     if (!gdriveEnabled || !gdriveToken) return false;
     try {
         const fileId = await findOrCreateDriveFile();
-        await snapshotCurrentDriveFileIfDue(fileId);
+        await snapshotCurrentDriveFileIfDue(fileId, forceSnapshot);
         const payload = JSON.stringify(data, null, 2);
         const blob = new Blob([payload], { type: 'application/json' });
         await gdriveFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`, 'PATCH', blob, true);
@@ -2292,12 +2292,15 @@ function setStatus(msg, color) {
 }
 
 // ── Auto-save: Drive primary, IndexedDB fallback ──────────
-async function triggerAutoSave() {
+// forceSnapshot=true skips the usual 3-minute backup throttle — used for Submit specifically,
+// so every submitted item gets its own guaranteed pre-save restore point, not just whichever
+// routine autosave happens to land outside the throttle window.
+async function triggerAutoSave(forceSnapshot = false) {
     // Always save a local backup immediately
     await saveLocalBackup(currentData);
     // Debounce Drive save
     clearTimeout(saveDebounceTimer);
-    saveDebounceTimer = setTimeout(() => saveData(), 1500);
+    saveDebounceTimer = setTimeout(() => saveData(forceSnapshot), 1500);
 }
 
 // ── Unsynced-data banner + background auto-retry ──────────
@@ -2384,14 +2387,14 @@ async function mergeRemoteAdditionsIntoLocal() {
     }
 }
 
-async function saveData() {
+async function saveData(forceSnapshot = false) {
     setStatus('💾 Saving…', 'text-yellow-400');
     // If we currently think we're connected, try a silent token refresh first — a token
     // that's gone stale after a long idle period will otherwise fail the save below with
     // no warning until the very end, when it's too late to avoid a local-only save.
     if (gdriveEnabled && gdriveToken) {
         await mergeRemoteAdditionsIntoLocal();
-        const saved = await saveToDrive(currentData);
+        const saved = await saveToDrive(currentData, forceSnapshot);
         if (saved) {
             setStatus('✅ Saved to Drive', 'text-green-400');
             await saveLocalBackup(currentData);
@@ -2544,22 +2547,65 @@ function formatDateMMDDYYYY(d) {
     return `${mm}/${dd}/${yyyy}`;
 }
 
-function finalizeSubmitToConsolidated(driveRef, revisionReason) {
+async function finalizeSubmitToConsolidated(driveRef, revisionReason) {
     const itemToSave = JSON.parse(JSON.stringify(editorItem));
     // Last Updated Date always reflects the actual submit/revision date
     itemToSave.date = formatDateMMDDYYYY(new Date());
     if (driveRef) itemToSave.drive_pdf_url = driveRef;
     if (!itemToSave.revision_history) itemToSave.revision_history = [];
-    if (editingIdx !== null) {
+
+    // Which existing row (by its own stable id, NOT its array position) this edit session
+    // was pointed at — captured before any refresh below, since a refresh can change what
+    // sits at any given index.
+    const editingItemId = (editingIdx !== null && currentData.main_items[editingIdx])
+        ? currentData.main_items[editingIdx].id
+        : null;
+
+    // Pull the latest data from Drive and reconcile this submit onto THAT, instead of
+    // blindly overwriting Drive with whatever currentData happens to be in this tab's
+    // memory. Without this, two submits close together — a second browser tab, a tab left
+    // open for a while, or a teammate working at the same time — can each compute their
+    // "next id" from their own stale copy of main_items, land on the very same id/array
+    // slot, and the second save's full-array overwrite silently erases the first person's
+    // item entirely. That is exactly what happened to AC-TLKIT-W: it was added as item 40,
+    // then a short time later a stale session submitted a new item that also computed id 40
+    // from ITS stale item count and overwrote it completely when it saved.
+    if (gdriveEnabled && gdriveToken) {
+        const fresh = await loadFromDriveFile().catch(() => null);
+        if (fresh && Array.isArray(fresh.main_items)) {
+            currentData.main_items = fresh.main_items;
+            if (fresh.users) currentData.users = fresh.users;
+        }
+    }
+
+    if (editingItemId !== null) {
+        // Re-locate the row by id — it may have moved now that we've just refreshed to the
+        // latest data.
+        const freshIdx = currentData.main_items.findIndex(it => it.id === editingItemId);
+        itemToSave.id = editingItemId;
         itemToSave.revision_history.push({
             rev: itemToSave.revision_history.length + 1,
             date: new Date().toISOString(),
             editor: currentEditorName(),
             reason: (revisionReason && revisionReason.trim()) || 'No reason provided'
         });
-        currentData.main_items[editingIdx] = itemToSave;
+        if (freshIdx !== -1) {
+            currentData.main_items[freshIdx] = itemToSave;
+        } else {
+            // Row is gone from the latest data (deleted elsewhere in the meantime) — don't
+            // silently drop this edit, add it back as its own entry so nothing is lost.
+            currentData.main_items.push(itemToSave);
+        }
     } else {
-        itemToSave.id = (currentData.main_items.length + 1).toString();
+        // New item — base the id on the highest id actually in use, not on array length.
+        // Array length breaks the moment any item has ever been deleted (next id reuses an
+        // id already in use), and it's exactly what let two concurrent sessions collide on
+        // the same "next" id in the first place.
+        const maxId = currentData.main_items.reduce((max, it) => {
+            const n = parseInt(it.id, 10);
+            return Number.isFinite(n) && n > max ? n : max;
+        }, 0);
+        itemToSave.id = (maxId + 1).toString();
         itemToSave.revision_history.push({
             rev: 1,
             date: new Date().toISOString(),
@@ -2575,7 +2621,10 @@ function finalizeSubmitToConsolidated(driveRef, revisionReason) {
     updateEditTabVisibility();
     renderEditorForm();
     updateConsolidatedBadge();
-    triggerAutoSave();
+    // Force a backup snapshot for every submit (not just whichever routine autosave happens
+    // to land outside the normal 3-minute throttle) — every submitted item gets its own
+    // guaranteed pre-save restore point this way.
+    triggerAutoSave(true);
     triggerSheetAutoSync();
     setTimeout(() => switchSheet('consolidated'), 800);
 }
