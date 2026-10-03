@@ -2903,10 +2903,10 @@ function buildReportHTML(item) {
                 ${sub.show_length!==false ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Length (L)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_l_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_l_in||'—'}</td></tr>` : ''}
                 ${sub.show_width!==false ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Width (W)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_w_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_w_in||'—'}</td></tr>` : ''}
                 ${sub.show_height!==false ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Height (H)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_h_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.dim_h_in||'—'}</td></tr>` : ''}
-                ${sub.show_thickness ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Thickness</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.thickness_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.thickness_in||'—'}</td></tr>` : ''}
-                ${sub.show_volume ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.volume_oz_l||'—'}</td></tr>` : ''}
-                ${sub.show_circumference ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Diameter</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.circumference_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.circumference_in||'—'}</td></tr>` : ''}
-                ${sub.show_elevation_angle ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Elevation/Angle</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.elevation_angle||'—'}</td></tr>` : ''}
+                ${sub.show_thickness ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Thickness (T)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.thickness_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.thickness_in||'—'}</td></tr>` : ''}
+                ${sub.show_volume ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume (V)</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.volume_oz_l||'—'}</td></tr>` : ''}
+                ${sub.show_circumference ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Diameter (D)</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.circumference_cm||'—'}</td><td style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.circumference_in||'—'}</td></tr>` : ''}
+                ${sub.show_elevation_angle ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Elevation/Angle (E/A)</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.elevation_angle||'—'}</td></tr>` : ''}
                 ${sub.show_weight!==false ? `<tr><td style="padding:5px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td><td colspan="2" style="padding:5px 8px;border:1px solid #d1d5db;text-align:center">${sub.weight_kg||'—'} kg ${!isNaN(parseFloat(sub.weight_kg))?'('+(parseFloat(sub.weight_kg)*2.205).toFixed(2)+' lbs)':''}</td></tr>` : ''}
             </table>`;
         }
@@ -2936,10 +2936,10 @@ function buildReportHTML(item) {
             ${sets.some(s=>s.show_length) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Length (L)</td>${sets.map(s=>s.show_length?(cell(s.l_cm)+cell(s.l_in)):(blank()+blank())).join('')}</tr>` : ''}
             ${sets.some(s=>s.show_width) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Width (W)</td>${sets.map(s=>s.show_width?(cell(s.w_cm)+cell(s.w_in)):(blank()+blank())).join('')}</tr>` : ''}
             ${sets.some(s=>s.show_height) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Height (H)</td>${sets.map(s=>s.show_height?(cell(s.h_cm)+cell(s.h_in)):(blank()+blank())).join('')}</tr>` : ''}
-            ${sets.some(s=>s.show_thickness) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Thickness</td>${sets.map(s=>s.show_thickness?(cell(s.thickness_cm)+cell(s.thickness_in)):(blank()+blank())).join('')}</tr>` : ''}
-            ${sets.some(s=>s.show_volume) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.show_volume ? (s.volume_oz_l||'—') : '—'}</td>`).join('')}</tr>` : ''}
-            ${sets.some(s=>s.show_circumference) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Diameter</td>${sets.map(s=>s.show_circumference?(cell(s.circumference_cm)+cell(s.circumference_in)):(blank()+blank())).join('')}</tr>` : ''}
-            ${sets.some(s=>s.show_elevation_angle) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Elevation/Angle</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.show_elevation_angle ? (s.elevation_angle||'—') : '—'}</td>`).join('')}</tr>` : ''}
+            ${sets.some(s=>s.show_thickness) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Thickness (T)</td>${sets.map(s=>s.show_thickness?(cell(s.thickness_cm)+cell(s.thickness_in)):(blank()+blank())).join('')}</tr>` : ''}
+            ${sets.some(s=>s.show_volume) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Volume (V)</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.show_volume ? (s.volume_oz_l||'—') : '—'}</td>`).join('')}</tr>` : ''}
+            ${sets.some(s=>s.show_circumference) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Diameter (D)</td>${sets.map(s=>s.show_circumference?(cell(s.circumference_cm)+cell(s.circumference_in)):(blank()+blank())).join('')}</tr>` : ''}
+            ${sets.some(s=>s.show_elevation_angle) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Elevation/Angle (E/A)</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.show_elevation_angle ? (s.elevation_angle||'—') : '—'}</td>`).join('')}</tr>` : ''}
             ${sets.some(s=>s.show_weight) ? `<tr><td style="padding:4px 6px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Weight</td>${sets.map(s=>`<td colspan="2" style="padding:4px 6px;border:1px solid #d1d5db;text-align:center">${s.show_weight ? (s.weight_kg||'—') + ' kg ' + (!isNaN(parseFloat(s.weight_kg))?'('+(parseFloat(s.weight_kg)*2.205).toFixed(2)+' lbs)':'') : '—'}</td>`).join('')}</tr>` : ''}
         </table>`;
     };
@@ -3896,10 +3896,10 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                         ${(item.compliance||[]).map((cp,cIdx)=>`
                         <tr>
                             <td class="p-1 text-center font-bold text-purple-400">${cp.id}</td>
-                            <td class="p-1"><input type="text" value="${cp.test||''}" oninput="editorItem.compliance[${cIdx}].test=this.value" class="w-full bg-transparent text-white focus:outline-none text-xs"></td>
-                            <td class="p-1"><input type="text" value="${cp.standard||''}" oninput="editorItem.compliance[${cIdx}].standard=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs"></td>
-                            <td class="p-1"><input type="text" value="${cp.criteria||''}" oninput="editorItem.compliance[${cIdx}].criteria=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs"></td>
-                            <td class="p-1"><input type="text" value="${cp.requirements||''}" oninput="editorItem.compliance[${cIdx}].requirements=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs"></td>
+                            <td class="p-1"><textarea rows="1" oninput="editorItem.compliance[${cIdx}].test=this.value" class="w-full bg-transparent text-white focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cp.test||''}</textarea></td>
+                            <td class="p-1"><textarea rows="1" oninput="editorItem.compliance[${cIdx}].standard=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cp.standard||''}</textarea></td>
+                            <td class="p-1"><textarea rows="1" oninput="editorItem.compliance[${cIdx}].criteria=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cp.criteria||''}</textarea></td>
+                            <td class="p-1"><textarea rows="1" oninput="editorItem.compliance[${cIdx}].requirements=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cp.requirements||''}</textarea></td>
                             <td class="p-1 text-center"><button onclick="editorDeleteCompliance(${cIdx})" class="text-gray-600 hover:text-red-400 cursor-pointer">✕</button></td>
                         </tr>`).join('')}
                     </tbody>
@@ -3943,9 +3943,9 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                         ${(item.ctq||[]).map((cq,qIdx)=>`
                         <tr>
                             <td class="p-1 text-center font-bold text-red-400">${cq.id}</td>
-                            <td class="p-1"><input type="text" value="${cq.factor||''}" oninput="editorItem.ctq[${qIdx}].factor=this.value" class="w-full bg-transparent text-white focus:outline-none text-xs"></td>
-                            <td class="p-1"><input type="text" value="${cq.description||''}" oninput="editorItem.ctq[${qIdx}].description=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs"></td>
-                            <td class="p-1"><input type="text" value="${cq.criteria||''}" oninput="editorItem.ctq[${qIdx}].criteria=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs"></td>
+                            <td class="p-1"><textarea rows="1" oninput="editorItem.ctq[${qIdx}].factor=this.value" class="w-full bg-transparent text-white focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cq.factor||''}</textarea></td>
+                            <td class="p-1"><textarea rows="1" oninput="editorItem.ctq[${qIdx}].description=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cq.description||''}</textarea></td>
+                            <td class="p-1"><textarea rows="1" oninput="editorItem.ctq[${qIdx}].criteria=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cq.criteria||''}</textarea></td>
                             <td class="p-1">
                                 <div class="flex flex-col items-center gap-1">
                                     <div tabindex="0" onclick="setActiveTarget('main',${mIdx},'ctq_photo_${qIdx}')" class="paste-target w-28 h-20 border border-gray-800 bg-gray-900 rounded overflow-hidden flex items-center justify-center text-[8px] cursor-pointer text-gray-600 font-mono text-center">
@@ -4035,10 +4035,10 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                                 <input type="text" value="${oc.item||''}" oninput="editorItem.other_components[${ocIdx}].item=this.value" class="w-full bg-transparent text-center text-pantone font-bold focus:outline-none text-xs" placeholder="${ocIdx+1}">
                             </td>
                             <td class="p-1.5">
-                                <input type="text" value="${oc.component_desc||''}" oninput="editorItem.other_components[${ocIdx}].component_desc=this.value" class="w-full bg-transparent text-white focus:outline-none text-xs" placeholder="Component description...">
+                                <textarea rows="1" oninput="editorItem.other_components[${ocIdx}].component_desc=this.value" class="w-full bg-transparent text-white focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word" placeholder="Component description...">${oc.component_desc||''}</textarea>
                             </td>
                             <td class="p-1.5">
-                                <input type="text" value="${oc.material||''}" oninput="editorItem.other_components[${ocIdx}].material=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs" placeholder="Material spec...">
+                                <textarea rows="1" oninput="editorItem.other_components[${ocIdx}].material=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word" placeholder="Material spec...">${oc.material||''}</textarea>
                             </td>
                             <td class="p-1.5 text-center">
                                 <button onclick="editorDeleteOtherComponent(${ocIdx})" class="text-gray-600 hover:text-red-400 cursor-pointer transition">✕</button>
@@ -4300,16 +4300,24 @@ function editorAddFeature() { editorItem.features.push({id:(editorItem.features.
 function editorDeleteFeature(fIdx) { editorItem.features.splice(fIdx,1); renderEditorForm(); }
 function editorAddBenefit() { editorItem.benefits.push({id:(editorItem.benefits.length+1).toString(),text:"",photo:""}); renderEditorForm(); }
 function editorDeleteBenefit(bIdx) { editorItem.benefits.splice(bIdx,1); renderEditorForm(); }
-function editorAddCompliance() { editorItem.compliance.push({id:(editorItem.compliance.length+1).toString(),test:"",standard:"",criteria:"",requirements:""}); renderEditorForm(); }
-function editorDeleteCompliance(cIdx) { editorItem.compliance.splice(cIdx,1); renderEditorForm(); }
-function editorAddCtq() { editorItem.ctq.push({id:(editorItem.ctq.length+1).toString(),factor:"",description:"",criteria:"",photo:""}); renderEditorForm(); }
-function editorDeleteCtq(qIdx) { editorItem.ctq.splice(qIdx,1); renderEditorForm(); }
+// Keeps REF/ITEM numbers matching each row's actual position (1, 2, 3...) after any add or
+// delete — same renumber-on-change pattern already used for BOM component Part IDs, applied
+// here to Compliance, CTQ, and Material Component rows so deleting row 5 shifts what was row
+// 6 up to become the new row 5, instead of leaving a stale, non-sequential number behind.
+function editorRenumberCompliance() { (editorItem.compliance||[]).forEach((c,i) => { c.id = (i+1).toString(); }); }
+function editorRenumberCtq() { (editorItem.ctq||[]).forEach((q,i) => { q.id = (i+1).toString(); }); }
+function editorRenumberOtherComponents() { (editorItem.other_components||[]).forEach((oc,i) => { oc.id = (i+1).toString(); oc.item = (i+1).toString(); }); }
+function editorAddCompliance() { editorItem.compliance.push({id:(editorItem.compliance.length+1).toString(),test:"",standard:"",criteria:"",requirements:""}); editorRenumberCompliance(); renderEditorForm(); }
+function editorDeleteCompliance(cIdx) { editorItem.compliance.splice(cIdx,1); editorRenumberCompliance(); renderEditorForm(); }
+function editorAddCtq() { editorItem.ctq.push({id:(editorItem.ctq.length+1).toString(),factor:"",description:"",criteria:"",photo:""}); editorRenumberCtq(); renderEditorForm(); }
+function editorDeleteCtq(qIdx) { editorItem.ctq.splice(qIdx,1); editorRenumberCtq(); renderEditorForm(); }
 function editorAddOtherComponent() {
     const n = editorItem.other_components.length + 1;
     editorItem.other_components.push({ id:n.toString(), item:n.toString(), component_desc:"", material:"" });
+    editorRenumberOtherComponents();
     renderEditorForm();
 }
-function editorDeleteOtherComponent(ocIdx) { editorItem.other_components.splice(ocIdx,1); renderEditorForm(); }
+function editorDeleteOtherComponent(ocIdx) { editorItem.other_components.splice(ocIdx,1); editorRenumberOtherComponents(); renderEditorForm(); }
 // ============================================================
 // DELETE PHOTO
 // ============================================================
@@ -5100,6 +5108,18 @@ function processImageBlobForTarget(target, blob) {
     uploadLocks[lockKey] = true;
     const filename = `${editorItem.sku_no || 'photo'}-${key}-${Date.now()}.png`;
 
+    // Resolve the actual component/drawing OBJECT up front, not just its array index.
+    // The Drive upload below happens in the background and can take a couple seconds — if
+    // the user drags components to reorder them while an upload is still in flight, writing
+    // the result back via a re-looked-up sIdx would land on whichever component now happens
+    // to sit at that index instead of the one actually pasted into. That's exactly what
+    // looked like a photo "duplicating" onto the wrong part after a drag-reorder. Holding a
+    // direct reference to the object means the Drive URL always lands back on the right
+    // component no matter how the list gets reordered in the meantime.
+    let targetObj = null;
+    if (type === 'sub') targetObj = editorItem.components[sIdx];
+    else if (type === 'drawing') targetObj = editorItem.drawings[sIdx];
+
     // ── Step 1: Show photo INSTANTLY using base64 ────────
     const reader = new FileReader();
     reader.onload = function(ev) {
@@ -5108,23 +5128,24 @@ function processImageBlobForTarget(target, blob) {
         // Get old URL for replacement later
         let oldUrl = null;
         if (type==='main') oldUrl = editorItem[key] || null;
-        else if (type==='sub') oldUrl = editorItem.components[sIdx]?.component_photo || null;
-        else if (type==='drawing') oldUrl = editorItem.drawings?.[sIdx]?.photo || null;
+        else if (type==='sub') oldUrl = targetObj?.component_photo || null;
+        else if (type==='drawing') oldUrl = targetObj?.photo || null;
 
         // Set base64 immediately so photo shows right away
         if (type==='main') editorItem[key] = base64;
-        else if (type==='sub') editorItem.components[sIdx].component_photo = base64;
-        else if (type==='drawing') editorItem.drawings[sIdx].photo = base64;
+        else if (type==='sub') { if (targetObj) targetObj.component_photo = base64; }
+        else if (type==='drawing') { if (targetObj) targetObj.photo = base64; }
         renderEditorForm();
         setLookupStatus('📸 Saving to Drive…', 'text-blue-400');
 
         // ── Step 2: Upload to Drive in background ─────────
         if (gdriveEnabled && gdriveToken) {
             uploadPhotoToDrive(blob, filename, oldUrl).then(driveUrl => {
-                // Replace base64 with Drive URL silently
+                // Replace base64 with Drive URL silently — written back onto the SAME object
+                // reference captured above, never a freshly re-looked-up array index.
                 if (type==='main') editorItem[key] = driveUrl;
-                else if (type==='sub') editorItem.components[sIdx].component_photo = driveUrl;
-                else if (type==='drawing') editorItem.drawings[sIdx].photo = driveUrl;
+                else if (type==='sub') { if (targetObj) targetObj.component_photo = driveUrl; }
+                else if (type==='drawing') { if (targetObj) targetObj.photo = driveUrl; }
                 // Don't re-render — photo already showing correctly
                 setLookupStatus('✅ Photo saved to Drive', 'text-green-400');
             }).catch(err => {
