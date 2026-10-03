@@ -2540,6 +2540,19 @@ function loadFromDrive() {
     input.click();
 }
 
+// A <textarea rows="1"> only reserves one line of visible height — text still wraps inside
+// it, but anything past the first line is hidden until someone manually drags the resize
+// handle. For table cells (Compliance, CTQ, Material Component, BOM descriptions) the whole
+// point is to see a long entry at a glance, not to go hunting for a resize handle — so these
+// start tall enough to show the full text already, estimating how many lines it'll wrap to
+// at the table's typical column width.
+function autoRows(text, charsPerRow = 28, minRows = 1, maxRows = 8) {
+    if (!text) return minRows;
+    const explicitLines = String(text).split('\n').length;
+    const wrappedEstimate = Math.ceil(String(text).length / charsPerRow);
+    return Math.min(maxRows, Math.max(minRows, explicitLines, wrappedEstimate));
+}
+
 function formatDateMMDDYYYY(d) {
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
@@ -3393,10 +3406,10 @@ function buildReportHTML(item) {
         <table style="width:100%;border-collapse:collapse;table-layout:fixed">
             <tr style="background:#111827"><td colspan="6" style="padding:8px;border:1px solid #374151;text-align:center;font-weight:900;font-size:11px;color:#fff;letter-spacing:0.05em">COMPLIANCE &amp; TESTING PROFILE MATRIX</td></tr>
             <tr style="background:#f3f4f6;font-size:9px;font-weight:700;color:#374151">
-                <td style="padding:5px 8px;border:1px solid #9ca3af;text-align:center;width:8%">REF</td>
-                <td style="padding:5px 8px;border:1px solid #9ca3af;width:24%">COMPONENT / FEATURE TESTING</td>
-                <td style="padding:5px 8px;border:1px solid #9ca3af;width:22%">STANDARD REFERENCE</td>
-                <td style="padding:5px 8px;border:1px solid #9ca3af;width:22%">ACCEPTANCE CRITERIA</td>
+                <td style="padding:5px 8px;border:1px solid #9ca3af;text-align:center;width:5%">REF</td>
+                <td style="padding:5px 8px;border:1px solid #9ca3af;width:25%">COMPONENT / FEATURE TESTING</td>
+                <td style="padding:5px 8px;border:1px solid #9ca3af;width:23%">STANDARD REFERENCE</td>
+                <td style="padding:5px 8px;border:1px solid #9ca3af;width:23%">ACCEPTANCE CRITERIA</td>
                 <td colspan="2" style="padding:5px 8px;border:1px solid #9ca3af;width:24%">REQUIREMENTS</td>
             </tr>
             ${(item.compliance||[]).length ? (item.compliance||[]).map(cp=>`
@@ -3722,7 +3735,7 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                 <div class="flex gap-4 text-xs">
                     <div class="flex-1 space-y-3">
                         <div class="grid grid-cols-3 gap-3">
-                            <div><label class="text-gray-400 font-bold block mb-1">Component Description</label><input type="text" value="${sub.description||''}" oninput="${dataRef}.components[${sIdx}].description=this.value" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
+                            <div><label class="text-gray-400 font-bold block mb-1">Component Description</label><textarea rows="${autoRows(sub.description)}" oninput="${dataRef}.components[${sIdx}].description=this.value" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${sub.description||''}</textarea></div>
                             <div><label class="text-gray-400 font-bold block mb-1">Material</label><textarea oninput="${dataRef}.components[${sIdx}].material=this.value" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone resize-y" style="min-height:60px">${sub.material||''}</textarea></div>
                             <div><label class="text-gray-400 font-bold block mb-1">Pantone / Color</label><textarea oninput="${dataRef}.components[${sIdx}].color=this.value" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone resize-y" style="min-height:60px">${sub.color||''}</textarea></div>
                         </div>
@@ -3945,10 +3958,10 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                         ${(item.compliance||[]).map((cp,cIdx)=>`
                         <tr>
                             <td class="p-1 text-center font-bold text-purple-400">${cp.id}</td>
-                            <td class="p-1"><textarea rows="1" oninput="editorItem.compliance[${cIdx}].test=this.value" class="w-full bg-transparent text-white focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cp.test||''}</textarea></td>
-                            <td class="p-1"><textarea rows="1" oninput="editorItem.compliance[${cIdx}].standard=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cp.standard||''}</textarea></td>
-                            <td class="p-1"><textarea rows="1" oninput="editorItem.compliance[${cIdx}].criteria=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cp.criteria||''}</textarea></td>
-                            <td class="p-1"><textarea rows="1" oninput="editorItem.compliance[${cIdx}].requirements=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cp.requirements||''}</textarea></td>
+                            <td class="p-1"><textarea rows="${autoRows(cp.test)}" oninput="editorItem.compliance[${cIdx}].test=this.value" class="w-full bg-transparent text-white focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cp.test||''}</textarea></td>
+                            <td class="p-1"><textarea rows="${autoRows(cp.standard)}" oninput="editorItem.compliance[${cIdx}].standard=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cp.standard||''}</textarea></td>
+                            <td class="p-1"><textarea rows="${autoRows(cp.criteria)}" oninput="editorItem.compliance[${cIdx}].criteria=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cp.criteria||''}</textarea></td>
+                            <td class="p-1"><textarea rows="${autoRows(cp.requirements)}" oninput="editorItem.compliance[${cIdx}].requirements=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cp.requirements||''}</textarea></td>
                             <td class="p-1 text-center"><button onclick="editorDeleteCompliance(${cIdx})" class="text-gray-600 hover:text-red-400 cursor-pointer">✕</button></td>
                         </tr>`).join('')}
                     </tbody>
@@ -3992,9 +4005,9 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                         ${(item.ctq||[]).map((cq,qIdx)=>`
                         <tr>
                             <td class="p-1 text-center font-bold text-red-400">${cq.id}</td>
-                            <td class="p-1"><textarea rows="1" oninput="editorItem.ctq[${qIdx}].factor=this.value" class="w-full bg-transparent text-white focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cq.factor||''}</textarea></td>
-                            <td class="p-1"><textarea rows="1" oninput="editorItem.ctq[${qIdx}].description=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cq.description||''}</textarea></td>
-                            <td class="p-1"><textarea rows="1" oninput="editorItem.ctq[${qIdx}].criteria=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cq.criteria||''}</textarea></td>
+                            <td class="p-1"><textarea rows="${autoRows(cq.factor)}" oninput="editorItem.ctq[${qIdx}].factor=this.value" class="w-full bg-transparent text-white focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cq.factor||''}</textarea></td>
+                            <td class="p-1"><textarea rows="${autoRows(cq.description)}" oninput="editorItem.ctq[${qIdx}].description=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cq.description||''}</textarea></td>
+                            <td class="p-1"><textarea rows="${autoRows(cq.criteria)}" oninput="editorItem.ctq[${qIdx}].criteria=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word">${cq.criteria||''}</textarea></td>
                             <td class="p-1">
                                 <div class="flex flex-col items-center gap-1">
                                     <div tabindex="0" onclick="setActiveTarget('main',${mIdx},'ctq_photo_${qIdx}')" class="paste-target w-28 h-20 border border-gray-800 bg-gray-900 rounded overflow-hidden flex items-center justify-center text-[8px] cursor-pointer text-gray-600 font-mono text-center">
@@ -4084,10 +4097,10 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                                 <input type="text" value="${oc.item||''}" oninput="editorItem.other_components[${ocIdx}].item=this.value" class="w-full bg-transparent text-center text-pantone font-bold focus:outline-none text-xs" placeholder="${ocIdx+1}">
                             </td>
                             <td class="p-1.5">
-                                <textarea rows="1" oninput="editorItem.other_components[${ocIdx}].component_desc=this.value" class="w-full bg-transparent text-white focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word" placeholder="Component description...">${oc.component_desc||''}</textarea>
+                                <textarea rows="${autoRows(oc.component_desc)}" oninput="editorItem.other_components[${ocIdx}].component_desc=this.value" class="w-full bg-transparent text-white focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word" placeholder="Component description...">${oc.component_desc||''}</textarea>
                             </td>
                             <td class="p-1.5">
-                                <textarea rows="1" oninput="editorItem.other_components[${ocIdx}].material=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word" placeholder="Material spec...">${oc.material||''}</textarea>
+                                <textarea rows="${autoRows(oc.material)}" oninput="editorItem.other_components[${ocIdx}].material=this.value" class="w-full bg-transparent text-gray-300 focus:outline-none text-xs resize-y" style="white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word" placeholder="Material spec...">${oc.material||''}</textarea>
                             </td>
                             <td class="p-1.5 text-center">
                                 <button onclick="editorDeleteOtherComponent(${ocIdx})" class="text-gray-600 hover:text-red-400 cursor-pointer transition">✕</button>
@@ -4411,14 +4424,14 @@ async function deletePhoto(type, key, sIdx=null) {
     } else if (driveDeleteError === 'not connected') {
         showToastAction('⚠', 'Removed from this record, but Google Drive isn\'t connected — the file itself is still in Drive. Sign in and delete it there too.', 'Sign in to Drive', () => connectGDrive('reconnect'));
     } else if (driveDeleteError && driveDeleteError.includes('404')) {
-        // A 404 means Drive says that specific file ID doesn't exist — not a permissions
-        // problem. This usually means the record's saved photo link had already gone stale
-        // (e.g. it was updated by another session/device after this one loaded its copy of
-        // the data), so we just deleted a reference to a file that isn't the one you're
-        // actually looking at in Drive. Reloading pulls the current data fresh from Drive so
-        // the link matches what's really there before trying again.
-        console.error('Drive photo delete failed (404 — stale reference):', driveDeleteError);
-        showToastAction('⚠', 'Removed from this record, but that photo\'s saved Drive link was already stale (file not found) — likely out of date from another edit. Reload to get the current data, then try again.', 'Reload page', () => location.reload(), 30000);
+        // A 404 means Drive says that specific file ID doesn't exist already — most likely
+        // the file was removed some other way already, or the saved link was stale from
+        // another edit. Either way, the only thing that actually matters to the person
+        // deleting a photo here is that it's gone from THIS record, which already succeeded
+        // above — there's nothing actionable for them to do about the underlying Drive file,
+        // so this is treated as a normal successful delete rather than a confusing warning.
+        console.log('Drive photo delete: file already gone (404) — reference removed from record.');
+        showToast('🗑', 'Photo deleted');
     } else {
         // Show the real API error (not a vague generic line) so the actual cause — expired
         // token (401), no permission (403), etc. — is visible instead of guessing. Logged in
