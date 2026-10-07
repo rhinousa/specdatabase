@@ -2270,6 +2270,7 @@ async function restoreFromBackup(fileId, whenLabel) {
         }
 
         currentData = loaded;
+        itemBaseline = new Map(); // restore = deliberate overwrite, local wins
         await saveLocalBackup(currentData);
         closeVersionHistoryModal();
         triggerAutoSave();
@@ -2446,12 +2447,42 @@ function mergeMissingItemsById(target, source, excludeIds) {
 // in-memory copy silently erases concurrent additions on the next save — this is
 // what happens when two people are editing at the same time and one session is
 // behind the other.
+// Per-item "what Drive looked like when THIS session last loaded/saved it". Lets a save tell
+// apart items this session actually edited from items it merely holds an old copy of. Without
+// this, any stale open tab (or another person's session) that saved anything at all rewrote
+// the whole file — silently reverting every item edited elsewhere since that tab loaded.
+// That is what reverted AC-SBRT177-SB-W (and AC-CBRE125x74-BLK) and brought the stuck
+// base64 photos back. A missing entry means "treat as edited here" (local wins), which is the
+// safe default for Restore / imports.
+let itemBaseline = new Map();
+function setItemBaseline(items) {
+    itemBaseline = new Map();
+    (items || []).forEach(it => { try { itemBaseline.set(String(it.id), JSON.stringify(it)); } catch(e) {} });
+}
+
 async function mergeRemoteAdditionsIntoLocal() {
     if (!gdriveEnabled || !gdriveToken) return;
     try {
         const remote = await loadFromDriveFile();
         if (!remote || !Array.isArray(remote.main_items)) return;
         if (!currentData.main_items) currentData.main_items = [];
+        // Adopt other sessions' newer versions of items this session did NOT touch.
+        const remoteById = new Map(remote.main_items.map(r => [String(r.id), r]));
+        let adopted = 0, conflicts = 0;
+        currentData.main_items = currentData.main_items.map(local => {
+            const id = String(local.id);
+            const r = remoteById.get(id);
+            const base = itemBaseline.get(id);
+            if (!r || base === undefined) return local;
+            const localStr = JSON.stringify(local);
+            const remoteStr = JSON.stringify(r);
+            if (localStr === remoteStr) return local;
+            if (localStr === base) { adopted++; return r; }          // untouched here → take Drive's newer copy
+            if (remoteStr !== base) conflicts++;                     // edited in both places → this session wins
+            return local;
+        });
+        if (adopted > 0) console.log(`Merge: kept ${adopted} item(s) edited elsewhere instead of overwriting them with this tab's older copy.`);
+        if (conflicts > 0) console.warn(`Merge: ${conflicts} item(s) were edited both here and elsewhere — this session's version was saved; the previous Drive version is in Backups.`);
         const added = mergeMissingItemsById(currentData.main_items, remote.main_items, recentlyDeletedIds);
         if (added > 0) console.log(`Merge: recovered ${added} item(s) added by another session before saving.`);
     } catch (err) {
@@ -2468,6 +2499,7 @@ async function saveData(forceSnapshot = false) {
         await mergeRemoteAdditionsIntoLocal();
         const saved = await saveToDrive(currentData, forceSnapshot);
         if (saved) {
+            setItemBaseline(currentData.main_items);
             setStatus('✅ Saved to Drive', 'text-green-400');
             await saveLocalBackup(currentData);
             hideUnsyncedBanner();
@@ -2497,6 +2529,7 @@ async function loadAllData() {
         const data = await loadFromDriveFile();
         if (data && data.main_items) {
             currentData = data;
+            setItemBaseline(currentData.main_items);
             if (!currentData.users) currentData.users = [];
             if (currentData.users.length === 0) currentData.users = [...DEFAULT_USERS];
             await saveLocalBackup(currentData);
@@ -2600,6 +2633,7 @@ function loadFromDrive() {
                 const loaded = JSON.parse(ev.target.result);
                 if (loaded && loaded.main_items) {
                     currentData = loaded;
+                    itemBaseline = new Map(); // restore = deliberate overwrite, local wins
                     triggerAutoSave();
                     buildConsolidatedView();
                     updateConsolidatedBadge();
@@ -2659,6 +2693,7 @@ async function finalizeSubmitToConsolidated(driveRef, revisionReason) {
         const fresh = await loadFromDriveFile().catch(() => null);
         if (fresh && Array.isArray(fresh.main_items)) {
             currentData.main_items = fresh.main_items;
+            setItemBaseline(fresh.main_items);
             if (fresh.users) currentData.users = fresh.users;
         }
     }
@@ -5484,6 +5519,7 @@ async function onGoogleConnected() {
         currentData = data;
         if (!currentData.users) currentData.users = [];
         if (!currentData.main_items) currentData.main_items = [];
+        setItemBaseline(currentData.main_items);
         const recovered = mergeMissingItemsById(currentData.main_items, localPending && localPending.main_items, recentlyDeletedIds);
         if (recovered > 0) {
             showToast('♻️', `Recovered ${recovered} unsynced item(s) from this device — re-saving to Drive.`);
@@ -5560,6 +5596,7 @@ async function postLoginInit() {
                 const data = await loadFromDriveFile();
                 if (data && data.main_items) {
                     currentData = data;
+                    setItemBaseline(currentData.main_items);
                     if (!currentData.users) currentData.users = [];
                     await saveLocalBackup(currentData);
                     buildConsolidatedView();
