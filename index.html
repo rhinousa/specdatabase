@@ -356,12 +356,19 @@
             </div>
 
             <!-- Search / Filter bar -->
+            <div class="relative">
             <div class="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-xl px-4 py-2.5">
                 <span class="text-gray-500 text-sm">🔍</span>
-                <input type="text" id="consolidated-search" oninput="filterConsolidated(this.value)"
+                <input type="text" id="consolidated-search" autocomplete="off"
+                    oninput="filterConsolidated(this.value);showSearchSuggestions(this.value)"
+                    onkeydown="searchSuggestKeydown(event)"
+                    onfocus="showSearchSuggestions(this.value)"
                     placeholder="Search by SKU, Description, Priority SKU, ASIN, UPC…"
                     class="flex-1 bg-transparent text-white text-xs focus:outline-none placeholder-gray-600">
-                <button onclick="document.getElementById('consolidated-search').value='';filterConsolidated('')" class="text-gray-600 hover:text-gray-400 text-xs cursor-pointer">✕ Clear</button>
+                <button onclick="document.getElementById('consolidated-search').value='';filterConsolidated('');hideSearchSuggestions()" class="text-gray-600 hover:text-gray-400 text-xs cursor-pointer">✕ Clear</button>
+            </div>
+            <div id="consolidated-suggest" class="hidden absolute left-0 right-0 mt-1 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden"
+                 style="z-index:60;max-height:340px;overflow-y:auto"></div>
             </div>
 
             <!-- Table wrapper — full width, always shows all columns -->
@@ -2799,14 +2806,138 @@ function buildConsolidatedView() {
     tbody.innerHTML = currentData.main_items.map((item, idx) => buildConsolidatedCard(item, idx)).join('');
 }
 
+// ── Search suggestions (Google-style dropdown under the search bar) ──
+let searchSuggestIdx = -1;
+let searchSuggestList = [];
+
+function escHtmlS(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function highlightMatch(text, tokens) {
+    let out = escHtmlS(text);
+    tokens.forEach(t => {
+        if (!t) return;
+        const re = new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
+        out = out.replace(re, '<mark style="background:rgba(250,204,21,.25);color:#fde68a;border-radius:2px">$1</mark>');
+    });
+    return out;
+}
+
+function buildSearchSuggestions(query) {
+    const tokens = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return [];
+    const scored = [];
+    (currentData.main_items || []).forEach(it => {
+        const fields = [
+            ['SKU', it.sku_no], ['ASIN', it.asin], ['UPC', it.upc], ['GTIN', it.gtin],
+            ['ID', it.id != null ? 'ID-' + it.id : ''], ['Priority', it.priority_sku], ['Desc', it.description]
+        ];
+        const hay = fields.map(f => String(f[1] || '').toLowerCase()).join(' | ');
+        if (!tokens.every(t => hay.includes(t))) return;
+        // Score: prefix of SKU best, then prefix of any field, then word start, then contains.
+        let score = 0, matchedField = null;
+        const first = tokens[0];
+        const sku = String(it.sku_no || '').toLowerCase();
+        if (sku.startsWith(first)) { score = 100; matchedField = 'SKU'; }
+        else {
+            for (const [label, val] of fields) {
+                const v = String(val || '').toLowerCase();
+                if (!v) continue;
+                if (v.startsWith(first)) { if (score < 80) { score = 80; matchedField = label; } }
+                else if (new RegExp('(^|[\\s\\-_/(])' + first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(v)) { if (score < 60) { score = 60; matchedField = label; } }
+                else if (v.includes(first)) { if (score < 40) { score = 40; matchedField = label; } }
+            }
+        }
+        scored.push({ it, score, matchedField });
+    });
+    scored.sort((a, b) => b.score - a.score || String(a.it.sku_no || '').localeCompare(String(b.it.sku_no || '')));
+    return scored.slice(0, 8).map(s => ({ ...s, tokens }));
+}
+
+function showSearchSuggestions(query) {
+    const box = document.getElementById('consolidated-suggest');
+    if (!box) return;
+    searchSuggestList = buildSearchSuggestions(query || '');
+    searchSuggestIdx = -1;
+    if (searchSuggestList.length === 0) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.innerHTML = searchSuggestList.map((s, i) => {
+        const it = s.it;
+        const tag = (s.matchedField && s.matchedField !== 'SKU' && s.matchedField !== 'Desc')
+            ? `<span class="ml-2 text-[9px] text-gray-500 border border-gray-700 rounded px-1.5 py-0.5">${escHtmlS(s.matchedField)}: ${highlightMatch(s.matchedField === 'ID' ? 'ID-' + it.id : (it[{ ASIN:'asin', UPC:'upc', GTIN:'gtin', Priority:'priority_sku' }[s.matchedField]] || ''), s.tokens)}</span>` : '';
+        return `<div class="search-suggest-row flex items-center gap-3 px-4 py-2 cursor-pointer border-b border-gray-800/60 last:border-0" data-i="${i}"
+                    onmousedown="event.preventDefault();pickSearchSuggestion(${i})"
+                    onmouseenter="setSearchSuggestActive(${i})">
+                    <span class="text-gray-600 text-xs">🔍</span>
+                    <div class="min-w-0 flex-1">
+                        <div class="text-[11px] text-white font-mono font-bold truncate">${highlightMatch(it.sku_no || '—', s.tokens)}${tag}</div>
+                        <div class="text-[10px] text-gray-400 truncate">${highlightMatch(it.description || '', s.tokens)}</div>
+                    </div>
+                </div>`;
+    }).join('');
+    box.classList.remove('hidden');
+}
+
+function hideSearchSuggestions() {
+    const box = document.getElementById('consolidated-suggest');
+    if (box) { box.classList.add('hidden'); }
+    searchSuggestIdx = -1;
+}
+
+function setSearchSuggestActive(i) {
+    searchSuggestIdx = i;
+    document.querySelectorAll('#consolidated-suggest .search-suggest-row').forEach((el, n) => {
+        el.style.background = n === i ? 'rgba(255,255,255,.07)' : '';
+    });
+    const act = document.querySelector(`#consolidated-suggest .search-suggest-row[data-i="${i}"]`);
+    if (act) act.scrollIntoView({ block: 'nearest' });
+}
+
+function pickSearchSuggestion(i) {
+    const s = searchSuggestList[i];
+    if (!s) return;
+    const input = document.getElementById('consolidated-search');
+    input.value = s.it.sku_no || s.it.description || '';
+    filterConsolidated(input.value);
+    hideSearchSuggestions();
+}
+
+function searchSuggestKeydown(e) {
+    const box = document.getElementById('consolidated-suggest');
+    const open = box && !box.classList.contains('hidden') && searchSuggestList.length > 0;
+    if (e.key === 'ArrowDown') {
+        if (!open) { showSearchSuggestions(e.target.value); return; }
+        e.preventDefault();
+        setSearchSuggestActive((searchSuggestIdx + 1) % searchSuggestList.length);
+    } else if (e.key === 'ArrowUp' && open) {
+        e.preventDefault();
+        setSearchSuggestActive((searchSuggestIdx - 1 + searchSuggestList.length) % searchSuggestList.length);
+    } else if (e.key === 'Enter') {
+        if (open && searchSuggestIdx >= 0) { e.preventDefault(); pickSearchSuggestion(searchSuggestIdx); }
+        else hideSearchSuggestions();
+    } else if (e.key === 'Escape') {
+        hideSearchSuggestions();
+    } else if (e.key === 'Tab' && open && searchSuggestIdx < 0) {
+        // Tab completes the top suggestion, like a shell / Google autocomplete.
+        e.preventDefault(); pickSearchSuggestion(0);
+    }
+}
+
+document.addEventListener('click', (e) => {
+    const input = document.getElementById('consolidated-search');
+    const box = document.getElementById('consolidated-suggest');
+    if (!box) return;
+    if (e.target !== input && !box.contains(e.target)) hideSearchSuggestions();
+});
+
 function filterConsolidated(query) {
-    const q = query.toLowerCase().trim();
+    const tokens = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const q = tokens.length > 0;
     const rows = document.querySelectorAll('#consolidated-grid tr');
     const noResults = document.getElementById('consolidated-no-results');
     let visible = 0;
     rows.forEach(row => {
         const text = row.textContent.toLowerCase();
-        const show = !q || text.includes(q);
+        const show = !q || tokens.every(t => text.includes(t));
         row.style.display = show ? '' : 'none';
         if (show) visible++;
     });
