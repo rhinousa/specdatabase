@@ -3,13 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHINO USA Specification Suite</title>
+    <title>RHINO USA Specification Suite · build 1007-D</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@600;700&display=swap" rel="stylesheet">
     <style>
         :root { --pantone-802c: #44D62C; }
+        .cs-bar:focus-within { border-color: var(--pantone-802c) !important; box-shadow: 0 0 0 2px rgba(68,214,44,0.2); }
+        .cs-row { display:flex; align-items:center; gap:14px; padding:9px 14px; cursor:pointer; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+        .cs-row.active { background: rgba(68,214,44,0.10); }
+        .cs-badge { flex:none; width:92px; text-align:center; font-size:9px; font-weight:800; letter-spacing:.12em; color:var(--pantone-802c); border:1px solid rgba(68,214,44,.55); background:rgba(68,214,44,.06); border-radius:4px; padding:3px 0; }
+        .cs-val { flex:1; min-width:0; color:#fff; font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; letter-spacing:.02em; }
+        .cs-val b { color:var(--pantone-802c); font-weight:800; }
         .text-pantone { color: var(--pantone-802c); }
         .bg-pantone { background-color: var(--pantone-802c); }
         .border-pantone { border-color: var(--pantone-802c); }
@@ -357,7 +363,7 @@
 
             <!-- Search / Filter bar -->
             <div class="relative">
-            <div class="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-xl px-4 py-2.5">
+            <div class="cs-bar flex items-center gap-3 rounded-xl px-4 py-2.5" style="background:#050805;border:1px solid #1f2a1f">
                 <span class="text-gray-500 text-sm">🔍</span>
                 <input type="text" id="consolidated-search" autocomplete="off"
                     oninput="filterConsolidated(this.value);showSearchSuggestions(this.value)"
@@ -367,58 +373,8 @@
                     class="flex-1 bg-transparent text-white text-xs focus:outline-none placeholder-gray-600">
                 <button onclick="document.getElementById('consolidated-search').value='';filterConsolidated('');hideSearchSuggestions()" class="text-gray-600 hover:text-gray-400 text-xs cursor-pointer">✕ Clear</button>
             </div>
-            <div id="consolidated-suggest" class="hidden absolute left-0 right-0 mt-1 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden"
-                 style="z-index:60;max-height:340px;overflow-y:auto"></div>
-            </div>
-
-            <!-- Table wrapper — full width, always shows all columns -->
-            <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div style="overflow-x:auto;width:100%">
-                    <table id="consolidated-table" style="width:100%;border-collapse:collapse;table-layout:fixed">
-                        <colgroup>
-                            <col style="width:36px">   <!-- checkbox -->
-                            <col style="width:60px">   <!-- ID -->
-                            <col style="width:160px">  <!-- SKU -->
-                            <col style="width:260px">  <!-- Description -->
-                            <col style="width:100px">  <!-- Priority SKU -->
-                            <col style="width:130px">  <!-- ASIN -->
-                            <col style="width:130px">  <!-- UPC -->
-                            <col style="width:100px">  <!-- Date Updated -->
-                            <col style="width:140px">  <!-- Last QE Revised -->
-                            <col style="width:150px">  <!-- QE Actions -->
-                            <col style="width:auto">   <!-- View Report — fills rest -->
-                        </colgroup>
-                        <thead>
-                            <tr class="bg-gray-800 border-b border-gray-700">
-                                <th class="px-2 py-2.5 text-center">
-                                    <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll(this.checked)"
-                                        class="w-3.5 h-3.5 rounded border-gray-600 cursor-pointer accent-pantone">
-                                </th>
-                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">ID</th>
-                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">SKU</th>
-                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">Description</th>
-                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">Priority SKU</th>
-                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">ASIN</th>
-                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">UPC</th>
-                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">Last Updated</th>
-                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">Last QE Revised</th>
-                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">QE Actions</th>
-                                <th class="px-3 py-2.5 text-left text-[9px] font-black text-gray-400 uppercase tracking-widest">View Report</th>
-                            </tr>
-                        </thead>
-                        <tbody id="consolidated-grid" class="divide-y divide-gray-800/60"></tbody>
-                    </table>
-                </div>
-                <div id="consolidated-empty" class="hidden text-center py-16">
-                    <div class="text-4xl mb-3">📋</div>
-                    <p class="text-gray-500 font-bold text-sm">No entries yet.</p>
-                    <p class="text-gray-600 text-xs mt-1">Submit a spec from the New Entry editor.</p>
-                    <button onclick="switchSheet('sheet1')" class="mt-4 bg-pantone text-black font-black text-xs px-5 py-2 rounded-lg cursor-pointer hover:opacity-90">Create First Entry</button>
-                </div>
-                <div id="consolidated-no-results" class="hidden text-center py-10">
-                    <p class="text-gray-500 text-sm">No entries match your search.</p>
-                    <button onclick="document.getElementById('consolidated-search').value='';filterConsolidated('')" class="mt-2 text-xs text-pantone cursor-pointer hover:underline">Clear search</button>
-                </div>
+            <div id="consolidated-suggest" class="hidden absolute left-0 right-0 overflow-hidden"
+                 style="z-index:60;margin-top:6px;background:#050805;border:1px solid #1f3a1f;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.7);max-height:360px;overflow-y:auto"></div>
             </div>
         </div>
 
@@ -1621,7 +1577,19 @@ async function loadEditorDraft() {
 // A draft is stale (nothing worth resuming) when it's blank, or when the item it belongs to
 // was already submitted AFTER the draft was last saved — resuming those is how old data
 // could get written back over newer data.
+const DISCARDED_DRAFTS_KEY = 'rhino_discarded_drafts_v1';
+function getDiscardedDrafts() {
+    try { return new Set(JSON.parse(localStorage.getItem(DISCARDED_DRAFTS_KEY) || '[]')); } catch(e) { return new Set(); }
+}
+function markDraftDiscarded(fileId) {
+    try {
+        const s = getDiscardedDrafts(); s.add(fileId);
+        localStorage.setItem(DISCARDED_DRAFTS_KEY, JSON.stringify([...s].slice(-200)));
+    } catch(e) {}
+}
+
 function isDraftStale(d) {
+    if (d && d._driveFileId && getDiscardedDrafts().has(d._driveFileId)) return true;
     if (!d || !d.editorItem || !isDraftMeaningful(d.editorItem)) return true;
     const it = d.editorItem;
     const savedMs = d.savedAt ? new Date(d.savedAt).getTime() : 0;
@@ -1674,7 +1642,11 @@ async function checkForEditorDraftRecovery() {
         // the "currently open" draft file id (null at login), so the Drive copy survived and
         // the same prompt came back every login.
         if (draft._driveFileId) {
-            try { await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${draft._driveFileId}?supportsAllDrives=true`, 'DELETE'); } catch(e) {}
+            // Remember the discard on this device FIRST, so even if Drive refuses the delete
+            // (permissions, network) this exact draft never prompts again here.
+            markDraftDiscarded(draft._driveFileId);
+            try { await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${draft._driveFileId}?supportsAllDrives=true`, 'DELETE'); }
+            catch(e) { console.error('Discard: Drive could not delete the draft file (hidden on this device instead):', e); }
         }
         await clearEditorDraft(draft.editorItem && draft.editorItem.sku_no);
     }
@@ -2814,44 +2786,53 @@ function escHtmlS(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 function highlightMatch(text, tokens) {
-    let out = escHtmlS(text);
-    tokens.forEach(t => {
-        if (!t) return;
-        const re = new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
-        out = out.replace(re, '<mark style="background:rgba(250,204,21,.25);color:#fde68a;border-radius:2px">$1</mark>');
-    });
-    return out;
+    // Escape first, then wrap every occurrence of every typed token in <b> (green via CSS).
+    const src = String(text == null ? '' : text);
+    const toks = tokens.filter(Boolean);
+    if (!toks.length) return escHtmlS(src);
+    const re = new RegExp('(' + toks.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'ig');
+    let out = '', last = 0, m;
+    while ((m = re.exec(src)) !== null) {
+        if (m[0] === '') { re.lastIndex++; continue; }
+        out += escHtmlS(src.slice(last, m.index)) + '<b>' + escHtmlS(m[0]) + '</b>';
+        last = m.index + m[0].length;
+    }
+    return out + escHtmlS(src.slice(last));
 }
 
+// Suggestions are distinct VALUES tagged with the field they came from (SKU, SUPPLIER-style
+// badge), like Google's autocomplete — not one row per item.
 function buildSearchSuggestions(query) {
     const tokens = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
     if (tokens.length === 0) return [];
-    const scored = [];
+    const FIELDS = [
+        ['SKU', 'sku_no'], ['DESCRIPTION', 'description'], ['ASIN', 'asin'], ['UPC', 'upc'],
+        ['GTIN', 'gtin'], ['PRIORITY SKU', 'priority_sku'], ['ITEM ID', 'id']
+    ];
+    const seen = new Set();
+    const out = [];
     (currentData.main_items || []).forEach(it => {
-        const fields = [
-            ['SKU', it.sku_no], ['ASIN', it.asin], ['UPC', it.upc], ['GTIN', it.gtin],
-            ['ID', it.id != null ? 'ID-' + it.id : ''], ['Priority', it.priority_sku], ['Desc', it.description]
-        ];
-        const hay = fields.map(f => String(f[1] || '').toLowerCase()).join(' | ');
-        if (!tokens.every(t => hay.includes(t))) return;
-        // Score: prefix of SKU best, then prefix of any field, then word start, then contains.
-        let score = 0, matchedField = null;
-        const first = tokens[0];
-        const sku = String(it.sku_no || '').toLowerCase();
-        if (sku.startsWith(first)) { score = 100; matchedField = 'SKU'; }
-        else {
-            for (const [label, val] of fields) {
-                const v = String(val || '').toLowerCase();
-                if (!v) continue;
-                if (v.startsWith(first)) { if (score < 80) { score = 80; matchedField = label; } }
-                else if (new RegExp('(^|[\\s\\-_/(])' + first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(v)) { if (score < 60) { score = 60; matchedField = label; } }
-                else if (v.includes(first)) { if (score < 40) { score = 40; matchedField = label; } }
-            }
-        }
-        scored.push({ it, score, matchedField });
+        FIELDS.forEach(([label, key]) => {
+            let val = it[key];
+            if (val == null) return;
+            val = String(val).trim();
+            if (!val || val === '—' || val === '-') return;
+            if (key === 'id') val = 'ID-' + val;
+            const low = val.toLowerCase();
+            if (!tokens.every(t => low.includes(t))) return;
+            const dk = label + '|' + low;
+            if (seen.has(dk)) return;
+            seen.add(dk);
+            let score = 40;
+            if (low.startsWith(tokens[0])) score = 100;
+            else if (new RegExp('(^|[\\s\\-_/(])' + tokens[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(low)) score = 70;
+            // Prefer SKU/description over the numeric id fields on ties.
+            const pri = { 'SKU': 0, 'DESCRIPTION': 1, 'ASIN': 2, 'UPC': 3, 'GTIN': 4, 'PRIORITY SKU': 5, 'ITEM ID': 6 }[label];
+            out.push({ label, val, score, pri, tokens });
+        });
     });
-    scored.sort((a, b) => b.score - a.score || String(a.it.sku_no || '').localeCompare(String(b.it.sku_no || '')));
-    return scored.slice(0, 8).map(s => ({ ...s, tokens }));
+    out.sort((a, b) => b.score - a.score || a.pri - b.pri || a.val.localeCompare(b.val));
+    return out.slice(0, 40);
 }
 
 function showSearchSuggestions(query) {
@@ -2860,20 +2841,11 @@ function showSearchSuggestions(query) {
     searchSuggestList = buildSearchSuggestions(query || '');
     searchSuggestIdx = -1;
     if (searchSuggestList.length === 0) { box.classList.add('hidden'); box.innerHTML = ''; return; }
-    box.innerHTML = searchSuggestList.map((s, i) => {
-        const it = s.it;
-        const tag = (s.matchedField && s.matchedField !== 'SKU' && s.matchedField !== 'Desc')
-            ? `<span class="ml-2 text-[9px] text-gray-500 border border-gray-700 rounded px-1.5 py-0.5">${escHtmlS(s.matchedField)}: ${highlightMatch(s.matchedField === 'ID' ? 'ID-' + it.id : (it[{ ASIN:'asin', UPC:'upc', GTIN:'gtin', Priority:'priority_sku' }[s.matchedField]] || ''), s.tokens)}</span>` : '';
-        return `<div class="search-suggest-row flex items-center gap-3 px-4 py-2 cursor-pointer border-b border-gray-800/60 last:border-0" data-i="${i}"
-                    onmousedown="event.preventDefault();pickSearchSuggestion(${i})"
-                    onmouseenter="setSearchSuggestActive(${i})">
-                    <span class="text-gray-600 text-xs">🔍</span>
-                    <div class="min-w-0 flex-1">
-                        <div class="text-[11px] text-white font-mono font-bold truncate">${highlightMatch(it.sku_no || '—', s.tokens)}${tag}</div>
-                        <div class="text-[10px] text-gray-400 truncate">${highlightMatch(it.description || '', s.tokens)}</div>
-                    </div>
-                </div>`;
-    }).join('');
+    box.innerHTML = searchSuggestList.map((s, i) =>
+        `<div class="cs-row" data-i="${i}" onmousedown="event.preventDefault();pickSearchSuggestion(${i})" onmouseenter="setSearchSuggestActive(${i})">
+            <span class="cs-badge">${escHtmlS(s.label)}</span>
+            <span class="cs-val" title="${escHtmlS(s.val)}">${highlightMatch(s.val, s.tokens)}</span>
+        </div>`).join('');
     box.classList.remove('hidden');
 }
 
@@ -2885,10 +2857,8 @@ function hideSearchSuggestions() {
 
 function setSearchSuggestActive(i) {
     searchSuggestIdx = i;
-    document.querySelectorAll('#consolidated-suggest .search-suggest-row').forEach((el, n) => {
-        el.style.background = n === i ? 'rgba(255,255,255,.07)' : '';
-    });
-    const act = document.querySelector(`#consolidated-suggest .search-suggest-row[data-i="${i}"]`);
+    document.querySelectorAll('#consolidated-suggest .cs-row').forEach((el, n) => el.classList.toggle('active', n === i));
+    const act = document.querySelector(`#consolidated-suggest .cs-row[data-i="${i}"]`);
     if (act) act.scrollIntoView({ block: 'nearest' });
 }
 
@@ -2896,7 +2866,7 @@ function pickSearchSuggestion(i) {
     const s = searchSuggestList[i];
     if (!s) return;
     const input = document.getElementById('consolidated-search');
-    input.value = s.it.sku_no || s.it.description || '';
+    input.value = s.val;
     filterConsolidated(input.value);
     hideSearchSuggestions();
 }
