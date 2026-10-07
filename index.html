@@ -1663,7 +1663,13 @@ async function checkForEditorDraftRecovery() {
         renderEditorForm();
         showToast('♻️', `Restored your unsaved editor draft from ${source}.`);
     } else {
-        clearEditorDraft();
+        // Discard must delete the draft that was actually offered. Before, it only deleted
+        // the "currently open" draft file id (null at login), so the Drive copy survived and
+        // the same prompt came back every login.
+        if (draft._driveFileId) {
+            try { await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${draft._driveFileId}?supportsAllDrives=true`, 'DELETE'); } catch(e) {}
+        }
+        await clearEditorDraft(draft.editorItem && draft.editorItem.sku_no);
     }
 }
 
