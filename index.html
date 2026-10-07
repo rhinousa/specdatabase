@@ -858,6 +858,8 @@ function editorHasChanges() {
 function exitEditor() {
     if (!editorHasChanges()) {
         // Nothing changed — close this editing session entirely and go straight to consolidated
+        const exitSku = editorItem && editorItem.sku_no;
+        clearEditorDraft(exitSku);
         editingIdx = null;
         editorItem = createBlankItem((currentData.main_items.length + 1).toString());
         editorSnapshot = JSON.stringify(editorItem);
@@ -1559,8 +1561,17 @@ const EDITOR_DRAFT_KEY = 'rhino_editor_draft_v1';
 let draftSaveTimer = null;
 let draftDirtySinceLastDriveSync = false;
 
+// A draft only counts if the user actually entered something identifying. A blank "new item"
+// shell (what the editor resets to after Submit / Exit) must never be saved as a draft or it
+// pops up "Resume unsaved editor work?" on every login.
+function isDraftMeaningful(item) {
+    if (!item) return false;
+    return !!(String(item.sku_no || '').trim() || String(item.description || '').trim() || String(item.upc || '').trim());
+}
+
 async function saveEditorDraft() {
     if (!editorItem) return;
+    if (!isDraftMeaningful(editorItem)) { try { await idbDelete(EDITOR_DRAFT_KEY); } catch(e) {} return; }
     try {
         await idbSet(EDITOR_DRAFT_KEY, {
             editingIdx, editorItem, savedAt: new Date().toISOString()
@@ -1578,9 +1589,12 @@ function scheduleDraftSave() {
     draftSaveTimer = setTimeout(saveEditorDraft, 800);
 }
 
-async function clearEditorDraft() {
+async function clearEditorDraft(skuLabel) {
     try { await idbDelete(EDITOR_DRAFT_KEY); } catch(e) {}
     await clearDraftFromDrive();
+    // Also remove any orphaned same-named Drive drafts (Drive allows duplicate names, and a
+    // reload loses the remembered file id), so a finished item can't resurrect later.
+    if (skuLabel) { try { await deleteDriveDraftsByName(draftFileNameFor({ sku_no: skuLabel })); } catch(e) {} }
     draftDirtySinceLastDriveSync = false;
     draftDriveFileId = null;
     resetEditorSaveStatus();
@@ -1597,10 +1611,30 @@ async function loadEditorDraft() {
 // checks Drive's own Drafts folder as a third recovery layer — covers the case where this
 // exact device/browser's local copy is gone too (cleared, different device, etc.) but the
 // periodic Drive draft sync had already captured a more recent version.
+// A draft is stale (nothing worth resuming) when it's blank, or when the item it belongs to
+// was already submitted AFTER the draft was last saved — resuming those is how old data
+// could get written back over newer data.
+function isDraftStale(d) {
+    if (!d || !d.editorItem || !isDraftMeaningful(d.editorItem)) return true;
+    const it = d.editorItem;
+    const savedMs = d.savedAt ? new Date(d.savedAt).getTime() : 0;
+    const main = (currentData.main_items || []).find(m => m.id === it.id && m.sku_no === it.sku_no)
+        || (currentData.main_items || []).find(m => m.sku_no && m.sku_no === it.sku_no);
+    if (!main) return false;
+    const rh = main.revision_history || [];
+    const last = rh.length ? new Date(rh[rh.length - 1].date).getTime() : 0;
+    return last >= savedMs;
+}
+
 async function checkForEditorDraftRecovery() {
-    const localDraft = await loadEditorDraft();
+    let localDraft = await loadEditorDraft();
+    if (localDraft && isDraftStale(localDraft)) { try { await idbDelete(EDITOR_DRAFT_KEY); } catch(e) {} localDraft = null; }
     let driveDraft = null;
-    try { driveDraft = await findMostRecentDriveDraftForCurrentUser(); } catch(e) {}
+    try {
+        const all = await listDriveDraftsForCurrentUser();
+        // Silently clean out stale/blank Drive drafts; keep only the newest live one.
+        for (const d of all) { if (isDraftStale(d)) { try { await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${d._driveFileId}?supportsAllDrives=true`, 'DELETE'); } catch(e) {} } else if (!driveDraft) driveDraft = d; }
+    } catch(e) {}
 
     // Prefer whichever copy is newer.
     let draft = localDraft;
@@ -2044,7 +2078,7 @@ function draftFileNameFor(item) {
 // main save is: after uploading, re-read the file's size back from Drive and confirm it
 // matches what was sent, rather than trusting an error-free request.
 async function syncDraftToDrive() {
-    if (!editorItem) return;
+    if (!editorItem || !isDraftMeaningful(editorItem)) return;
     if (!gdriveEnabled || !gdriveToken) { setEditorDriveStatus('offline'); return; }
     if (draftSyncInFlight) return;
     draftSyncInFlight = true;
@@ -2086,6 +2120,38 @@ async function clearDraftFromDrive() {
 // Third recovery layer: if this device's local draft copy is gone (cleared, different
 // device/browser), check Drive's Drafts folder for the most recent one saved under this
 // user's name, so a lost local draft doesn't automatically mean lost work.
+async function deleteDriveDraftsByName(name) {
+    if (!gdriveEnabled || !gdriveToken) return;
+    const folderId = await getOrCreateDraftsFolder();
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and name='${name.replace(/'/g, "\\'")}'`);
+    const r = await gdriveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&pageSize=50&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    for (const f of (r.files || [])) {
+        try { await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${f.id}?supportsAllDrives=true`, 'DELETE'); } catch(e) {}
+    }
+}
+
+// All of this user's Drive drafts, newest first, parsed.
+async function listDriveDraftsForCurrentUser() {
+    if (!gdriveEnabled || !gdriveToken) return [];
+    const folderId = await getOrCreateDraftsFolder();
+    const who = currentEditorName().replace(/[^a-zA-Z0-9_-]/g, '_');
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and name contains 'Draft-${who}-'`);
+    const results = await gdriveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=50&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    const out = [];
+    for (const f of (results.files || [])) {
+        try {
+            const res = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media&supportsAllDrives=true`, { headers: { 'Authorization': 'Bearer ' + gdriveToken } });
+            if (!res.ok) continue;
+            const data = await res.json();
+            if (!data) continue;
+            data._driveFileId = f.id;
+            if (!data.savedAt) data.savedAt = f.modifiedTime;
+            out.push(data);
+        } catch(e) {}
+    }
+    return out;
+}
+
 async function findMostRecentDriveDraftForCurrentUser() {
     if (!gdriveEnabled || !gdriveToken) return null;
     const folderId = await getOrCreateDraftsFolder();
@@ -2627,10 +2693,11 @@ async function finalizeSubmitToConsolidated(driveRef, revisionReason) {
         });
         currentData.main_items.push(itemToSave);
     }
+    const submittedSku = itemToSave.sku_no;
     editingIdx = null;
     editorItem = createBlankItem((currentData.main_items.length + 1).toString());
     editorSnapshot = JSON.stringify(editorItem);
-    clearEditorDraft(); // this item's data now lives in currentData/Drive — the draft's job is done
+    clearEditorDraft(submittedSku); // this item's data now lives in currentData/Drive — the draft's job is done
     updateEditTabVisibility();
     renderEditorForm();
     updateConsolidatedBadge();
