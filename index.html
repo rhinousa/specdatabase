@@ -550,7 +550,7 @@ const innerCasePhotoKeys = [
 // ============================================================
 function createBlankItem(id) {
     return {
-        id, description:"", sku_no:"", priority_sku:"", date:"", asin:"", upc:"", gtin:"", photo_remarks:"",
+        id, description:"", sku_no:"", priority_sku:"", show_priority_sku:false, date:"", asin:"", upc:"", gtin:"", photo_remarks:"",
         package_contents:[],
         product_photo:"", pkg_content_photo:"", front_photo:"", rear_photo:"", left_photo:"", right_photo:"", top_photo:"", bottom_photo:"", drawing_photo:"", drawings:[],
         show_master_carton:true,
@@ -3476,12 +3476,17 @@ function buildReportHTML(item) {
                 <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.gtin||'—'}</td>
             </tr>
             <tr>
+                ${priorityVisible(item) ? `
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">Priority SKU:</td>
                 <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.priority_sku||'—'}</td>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">ASIN:</td>
                 <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.asin||'—'}</td>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">Last Updated Date:</td>
-                <td style="padding:6px 10px;border:1px solid #9ca3af">${item.date||'—'}</td>
+                <td style="padding:6px 10px;border:1px solid #9ca3af">${item.date||'—'}</td>` : `
+                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">ASIN:</td>
+                <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.asin||'—'}</td>
+                <td colspan="2" style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">Last Updated Date:</td>
+                <td colspan="2" style="padding:6px 10px;border:1px solid #9ca3af">${item.date||'—'}</td>`}
             </tr>
 
             <!-- MAIN PRODUCT PHOTOS (stacked, full width, larger) -->
@@ -3842,10 +3847,17 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                 </div>
                 <!-- Row 3: Priority SKU, ASIN, Last Updated Date -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    ${priorityVisible(item) ? `
                     <div>
-                        <label class="text-gray-400 font-bold block mb-1">Priority SKU</label>
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="text-gray-400 font-bold">Priority SKU</label>
+                            ${E ? `<button type="button" onclick="editorTogglePriority()" class="text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer bg-pantone/20 text-pantone border border-pantone/40">− Hide</button>` : ''}
+                        </div>
                         <input type="text" value="${item.priority_sku||''}" oninput="${dataRef}.priority_sku=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone">
-                    </div>
+                    </div>` : `
+                    <div class="flex items-end">
+                        ${E ? `<button type="button" onclick="editorTogglePriority()" class="text-[10px] font-bold px-3 py-2 rounded cursor-pointer bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone">+ Add Priority SKU</button>` : ''}
+                    </div>`}
                     <div><label class="text-gray-400 font-bold block mb-1">ASIN</label><input type="text" value="${item.asin||''}" oninput="${dataRef}.asin=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
                     <div><label class="text-gray-400 font-bold block mb-1">Last Updated Date</label><input type="text" value="${item.date||''}" oninput="${dataRef}.date=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
                 </div>
@@ -4529,6 +4541,19 @@ function renderEditorQuickNavMenu() {
 // Same defaultTrue-aware toggle as editorToggleSubParam, but for item-level (not per-component)
 // fields such as Carton Remarks / Artwork Link / Box Remarks, which default to shown so old
 // saved items keep behaving exactly as before this toggle existed.
+// Priority SKU is optional: hidden by default on new items. Older items that never had the
+// flag but already hold a Priority SKU value keep showing it (so existing PDFs don't lose it).
+function priorityVisible(item) {
+    if (!item) return false;
+    if (item.show_priority_sku === undefined || item.show_priority_sku === null) {
+        return !!String(item.priority_sku || '').trim();
+    }
+    return !!item.show_priority_sku;
+}
+function editorTogglePriority() {
+    editorItem.show_priority_sku = !priorityVisible(editorItem);
+    renderEditorForm();
+}
 function editorToggleItemParam(key, defaultTrue) {
     const current = defaultTrue ? (editorItem[key] !== false) : !!editorItem[key];
     editorItem[key] = !current;
