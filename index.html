@@ -550,7 +550,7 @@ const innerCasePhotoKeys = [
 // ============================================================
 function createBlankItem(id) {
     return {
-        id, description:"", sku_no:"", priority_sku:"", show_priority_sku:false, date:"", asin:"", upc:"", gtin:"", photo_remarks:"",
+        id, description:"", sku_no:"", priority_sku:"", show_priority_sku:false, date:"", asin:"", upc:"", gtin:"", show_gtin:false, photo_remarks:"",
         package_contents:[],
         product_photo:"", pkg_content_photo:"", front_photo:"", rear_photo:"", left_photo:"", right_photo:"", top_photo:"", bottom_photo:"", drawing_photo:"", drawings:[],
         show_master_carton:true,
@@ -3467,26 +3467,30 @@ function buildReportHTML(item) {
 
             <!-- IDENTITY -->
             <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">Item Description:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af;font-size:13px;font-weight:700">${item.description||'—'}</td></tr>
+            <!-- Right-hand pair (UPC / Last Updated) always sits in the same two columns (5-6), so
+                 their borders line up whether or not GTIN / Priority SKU are shown. -->
             <tr>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">SKU:</td>
+                ${gtinVisible(item) ? `
                 <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.sku_no||'—'}</td>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">UPC:</td>
                 <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.upc||'—'}</td>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">GTIN:</td>
-                <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.gtin||'—'}</td>
+                <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.gtin||'—'}</td>` : `
+                <td colspan="3" style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.sku_no||'—'}</td>
+                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">UPC:</td>
+                <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.upc||'—'}</td>`}
             </tr>
             <tr>
                 ${priorityVisible(item) ? `
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">Priority SKU:</td>
                 <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.priority_sku||'—'}</td>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">ASIN:</td>
-                <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.asin||'—'}</td>
-                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">Last Updated Date:</td>
-                <td style="padding:6px 10px;border:1px solid #9ca3af">${item.date||'—'}</td>` : `
+                <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.asin||'—'}</td>` : `
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">ASIN:</td>
-                <td style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.asin||'—'}</td>
-                <td colspan="2" style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">Last Updated Date:</td>
-                <td colspan="2" style="padding:6px 10px;border:1px solid #9ca3af">${item.date||'—'}</td>`}
+                <td colspan="3" style="padding:6px 10px;border:1px solid #9ca3af;font-family:monospace">${item.asin||'—'}</td>`}
+                <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px;white-space:nowrap">Last Updated Date:</td>
+                <td style="padding:6px 10px;border:1px solid #9ca3af">${item.date||'—'}</td>
             </tr>
 
             <!-- MAIN PRODUCT PHOTOS (stacked, full width, larger) -->
@@ -3843,7 +3847,17 @@ function buildItemFormHTML(item, mIdx, isEditor) {
                         <p id="sku-lookup-status" class="hidden text-[10px] font-bold mt-1"></p>
                     </div>
                     <div><label class="text-gray-400 font-bold block mb-1">UPC</label><input type="text" value="${item.upc||''}" oninput="${dataRef}.upc=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
-                    <div><label class="text-gray-400 font-bold block mb-1">GTIN</label><input type="text" value="${item.gtin||''}" oninput="${dataRef}.gtin=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone"></div>
+                    ${gtinVisible(item) ? `
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="text-gray-400 font-bold">GTIN</label>
+                            ${E ? `<button type="button" onclick="editorToggleGtin()" class="text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer bg-pantone/20 text-pantone border border-pantone/40">− Hide</button>` : ''}
+                        </div>
+                        <input type="text" value="${item.gtin||''}" oninput="${dataRef}.gtin=this.value" class="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white focus:outline-none focus-pantone">
+                    </div>` : `
+                    <div class="flex items-end">
+                        ${E ? `<button type="button" onclick="editorToggleGtin()" class="text-[10px] font-bold px-3 py-2 rounded cursor-pointer bg-gray-950 text-gray-400 border border-gray-800 hover:text-pantone">+ Add GTIN</button>` : ''}
+                    </div>`}
                 </div>
                 <!-- Row 3: Priority SKU, ASIN, Last Updated Date -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -4549,6 +4563,15 @@ function priorityVisible(item) {
         return !!String(item.priority_sku || '').trim();
     }
     return !!item.show_priority_sku;
+}
+function gtinVisible(item) {
+    if (!item) return false;
+    if (item.show_gtin === undefined || item.show_gtin === null) return !!String(item.gtin || '').trim();
+    return !!item.show_gtin;
+}
+function editorToggleGtin() {
+    editorItem.show_gtin = !gtinVisible(editorItem);
+    renderEditorForm();
 }
 function editorTogglePriority() {
     editorItem.show_priority_sku = !priorityVisible(editorItem);
