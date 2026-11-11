@@ -503,6 +503,7 @@
 // ============================================================
 // STATE
 // ============================================================
+const DEFAULT_USERS = [];   // was referenced but never defined — broke first sign-in on a browser with no saved data
 let currentData = { main_items: [], users: [] };   // consolidated items + users
 let editorItem = null;                  // single item being edited in sheet1
 let editingIdx = null;                  // null = new, number = editing existing
