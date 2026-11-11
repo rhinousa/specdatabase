@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RHINO USA Specification Suite · build 1020-F</title>
+    <title>RHINO USA Specification Suite · SHEET DB · build S1-A</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -255,22 +255,14 @@
 
     <!-- Persistence controls — pinned to bottom -->
     <div class="p-3 border-t border-gray-800 space-y-2 shrink-0">
-        <div class="flex items-center justify-between">
-            <span id="drive-save-indicator" class="text-[10px] text-gray-600 font-bold"></span>
-            <button onclick="syncFromCloud()" class="text-[10px] text-gray-500 hover:text-pantone cursor-pointer font-bold transition flex items-center gap-1">🔄 Sync</button>
-        </div>
+        <span id="drive-save-indicator" class="block text-[10px] text-gray-600 font-bold"></span>
+        <button onclick="syncFromCloud()" class="text-[10px] text-gray-500 hover:text-pantone cursor-pointer font-bold transition flex items-center gap-1 px-0">🔄 Sync</button>
         <div id="gdrive-connect-btn" class="hidden">
             <button onclick="connectGDrive('reconnect')" class="w-full bg-blue-900/40 hover:bg-blue-800/60 border border-blue-700/50 text-blue-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">
                 🔗 Connect Google Drive
             </button>
         </div>
-        <div class="flex gap-1.5">
-            <button onclick="handleBackupClick()" class="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">⬇️ Backup</button>
-            <button onclick="handleRestoreClick()" class="flex-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">📂 Restore</button>
-        </div>
-        <button onclick="handleVersionHistoryClick()" class="w-full bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-[9px] font-bold py-1.5 rounded-lg cursor-pointer transition">🕐 Version History</button>
-        <button onclick="reportStuckBase64Photos()" title="Rarely needed: Submit now uploads leftover photos automatically" class="w-full text-gray-600 hover:text-gray-400 text-[8px] py-1 cursor-pointer transition">🧹 Maintenance: stuck photos</button>
-        <p class="text-[9px] text-gray-700 leading-tight">Saves to Google Drive when connected</p>
+        <p class="text-[9px] text-gray-600 leading-tight">Saves to the Google Sheet when connected</p>
     </div>
 
     <!-- User info + Sign Out — very bottom -->
@@ -299,6 +291,9 @@
                     <p id="editor-header-sub" class="text-xs text-gray-500 mt-0.5">Fill in all fields, then submit to save into the Consolidated Manager.</p>
                 </div>
                 <div class="flex items-center gap-2">
+                    <button onclick="openMassUpload()" class="bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white text-xs font-black px-4 py-2 rounded-lg cursor-pointer shadow flex items-center gap-1.5">
+                        📤 Mass Upload
+                    </button>
                     <button onclick="previewAndExportPDF()" class="bg-pantone text-black text-xs font-black px-4 py-2 rounded-lg cursor-pointer hover:opacity-90 shadow flex items-center gap-1.5">
                         👁 Preview PDF
                     </button>
@@ -1250,7 +1245,7 @@ function openPdfReport(idx) {
 // SKU AUTO-LOOKUP — Live from Google Sheets
 // ============================================================
 const GSHEETS_API_KEY = ''; // Not needed — OAuth token used instead
-const GSHEETS_ID = '1MrcrTQp-Ttp7yhJ0LhsklnQCMQOhg9CUX-r7OLSjUpk';
+const GSHEETS_ID = '1MrcrTQp-Ttp7yhJ0LhsklnQCMQOhg9CUX-r7OLSjUpk';   // Product Master Data Catalogue
 const GSHEETS_RANGE = 'Sheet1';
 let sheetCache = null;
 let sheetCacheTime = 0;
@@ -1277,18 +1272,22 @@ async function fetchSheetData() {
     const now = Date.now();
     if (sheetCache && (now - sheetCacheTime) < 300000) return sheetCache;
 
-    // Use OAuth token if Drive is connected, otherwise fall back to API key
-    let url, headers = {};
-    if (gdriveEnabled && gdriveToken) {
-        url = `https://sheets.googleapis.com/v4/spreadsheets/${GSHEETS_ID}/values/${GSHEETS_RANGE}`;
-        headers = { 'Authorization': 'Bearer ' + gdriveToken };
-    } else if (GSHEETS_API_KEY) {
-        url = `https://sheets.googleapis.com/v4/spreadsheets/${GSHEETS_ID}/values/${GSHEETS_RANGE}?key=${GSHEETS_API_KEY}`;
-    } else {
-        throw new Error('No authentication available — connect Google Drive first');
+    const sources = [[GSHEETS_ID, GSHEETS_RANGE]];
+    let res = null;
+    for (const [sid, srange] of sources) {
+        let url, headers = {};
+        if (gdriveEnabled && gdriveToken) {
+            url = `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(srange)}`;
+            headers = { 'Authorization': 'Bearer ' + gdriveToken };
+        } else if (GSHEETS_API_KEY) {
+            url = `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(srange)}?key=${GSHEETS_API_KEY}`;
+        } else {
+            throw new Error('No authentication available — connect Google Drive first');
+        }
+        try { res = await fetch(url, { headers }); } catch (e) { res = null; continue; }
+        if (res.ok) break;
     }
-
-    const res = await fetch(url, { headers });
+    if (!res) throw new Error('Could not reach the master data sheet');
 
     if (!res.ok) {
         let errBody = '';
@@ -1308,7 +1307,8 @@ async function fetchSheetData() {
 
     const idxSKU     = 0; // SKU is always first column
     const idxASIN    = col('asin');
-    const idxDesc    = col('product description');
+    // The header is now just "Description" (column D); older copies said "Product Description".
+    const idxDesc    = (() => { let i = col('product description'); if (i < 0) i = colHeaders.findIndex(h => h === 'description'); if (i < 0) i = 3; return i; })();
     const idxUPC     = col('upc');
     const idxABC     = col('abc class');
     const idxGBL     = col('gift box length cm');
@@ -1360,10 +1360,16 @@ async function fetchSheetData() {
 async function autoFillFromSKU(sku) {
     setLookupStatus('🔍 Looking up…', 'text-blue-400');
     try {
-        const map = await fetchSheetData();
-        const row = map[sku];
+        let map;
+        try { map = await fetchSheetData(); }
+        catch (e1) {
+            if (/401|Unauthorized|UNAUTHENTICATED/i.test(String(e1.message)) && await silentReconnectGDrive().catch(() => false)) { sheetCache = null; map = await fetchSheetData(); }
+            else throw e1;
+        }
+        let row = map[sku];
+        if (!row) { const k = Object.keys(map).find(x => x.trim().toLowerCase() === sku.trim().toLowerCase()); if (k) row = map[k]; }
         if (!row) {
-            setLookupStatus('⚠️ SKU not found in sheet', 'text-orange-400');
+            setLookupStatus('⚠️ SKU not found in the Fulfil master sheet — type the description manually', 'text-orange-400');
             return;
         }
         let filled = 0;
@@ -1704,7 +1710,7 @@ async function checkForEditorDraftRecovery() {
     try {
         const all = await listDriveDraftsForCurrentUser();
         // Silently clean out stale/blank Drive drafts; keep only the newest live one.
-        for (const d of all) { if (isDraftStale(d)) { try { await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${d._driveFileId}?supportsAllDrives=true`, 'DELETE'); } catch(e) {} } else if (!driveDraft) driveDraft = d; }
+        for (const d of all) { if (isDraftStale(d)) { try { await sdbDeleteDraftByKey(d._driveFileId); } catch(e) {} } else if (!driveDraft) driveDraft = d; }
     } catch(e) {}
 
     // Prefer whichever copy is newer.
@@ -1712,7 +1718,7 @@ async function checkForEditorDraftRecovery() {
     let source = 'this device';
     if (driveDraft && (!localDraft || new Date(driveDraft.savedAt) > new Date(localDraft.savedAt))) {
         draft = driveDraft;
-        source = 'Google Drive';
+        source = 'Google Sheet';
     }
     if (!draft || !draft.editorItem) return;
 
@@ -1741,8 +1747,8 @@ async function checkForEditorDraftRecovery() {
             // Remember the discard on this device FIRST, so even if Drive refuses the delete
             // (permissions, network) this exact draft never prompts again here.
             markDraftDiscarded(draft._driveFileId);
-            try { await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${draft._driveFileId}?supportsAllDrives=true`, 'DELETE'); }
-            catch(e) { console.error('Discard: Drive could not delete the draft file (hidden on this device instead):', e); }
+            try { await sdbDeleteDraftByKey(draft._driveFileId); }
+            catch(e) { console.error('Discard: could not delete the draft row (hidden on this device instead):', e); }
         }
         await clearEditorDraft(draft.editorItem && draft.editorItem.sku_no);
     }
@@ -1905,7 +1911,7 @@ async function silentReconnectGDrive() {
                     resolve(false);
                 }
             });
-            client.requestAccessToken({ prompt: '' });
+            client.requestAccessToken({ prompt: '', hint: currentUser?.email || undefined, login_hint: currentUser?.email || undefined });
         });
     } catch(err) {
         console.error('Silent reconnect error:', err);
@@ -2025,7 +2031,10 @@ async function connectGDrive(mode = 'login') {
                 }
             }
         });
-        client.requestAccessToken();
+        // On re-login the account is already known, so Google can skip the account picker.
+        client.requestAccessToken(mode === 'reconnect'
+            ? { prompt: '', hint: currentUser?.email || undefined, login_hint: currentUser?.email || undefined }
+            : undefined);
     } catch(err) {
         console.error('Drive connect error:', err);
         setStatus('❌ Drive connection failed', 'text-red-400');
@@ -2183,7 +2192,7 @@ async function snapshotCurrentDriveFileIfDue(fileId, force = false) {
 // hundred ms on its own — draftSyncInFlight already skips any tick that lands while the
 // previous sync is still in flight, so going lower than this wouldn't sync any faster, it
 // would just skip more ticks while waiting on the network.
-const DRAFT_SYNC_INTERVAL_MS = 1000;
+const DRAFT_SYNC_INTERVAL_MS = 10000;   // sheet writes are rate-limited, so drafts sync every 10 s
 const DRAFTS_FOLDER_NAME = 'Drafts';
 let draftsFolderId = null;
 let draftDriveFileId = null;
@@ -2599,8 +2608,10 @@ function sameItemIdentity(a, b) {
     return (a.sku_no || '') === (b.sku_no || '');
 }
 function nextFreeItemId(...lists) {
-    let max = 0;
-    lists.forEach(l => (l || []).forEach(it => { const n = parseInt(it.id, 10); if (Number.isFinite(n) && n > max) max = n; }));
+    let max = 0; const used = new Set();
+    lists.forEach(l => (l || []).forEach(it => { const n = parseInt(it.id, 10); if (Number.isFinite(n)) { used.add(n); if (n > max) max = n; } }));
+    // keep the sequence tidy: reuse a gap left by a recently deleted item (within the last 10 IDs)
+    for (let n = Math.max(1, max - 9); n < max; n++) if (!used.has(n)) return n.toString();
     return (max + 1).toString();
 }
 function setItemBaseline(items) {
@@ -2831,7 +2842,7 @@ function formatDateMMDDYYYY(d) {
 }
 
 // Adds/replaces the submitted item in `list` (a copy is returned) and stamps its revision.
-function applySubmittedItem(list, base, editingItemId, revisionReason) {
+function applySubmittedItem(list, base, editingItemId, revisionReason, isNewLive) {
     const it = JSON.parse(JSON.stringify(base));
     if (!it.revision_history) it.revision_history = [];
     const out = list.slice();
@@ -2844,12 +2855,16 @@ function applySubmittedItem(list, base, editingItemId, revisionReason) {
             it.id = nextFreeItemId(out);
             idx = -1;
         }
-        it.revision_history.push({
-            rev: it.revision_history.length + 1,
-            date: new Date().toISOString(),
-            editor: currentEditorName(),
-            reason: (revisionReason && revisionReason.trim()) || 'No reason provided'
-        });
+        if (isNewLive) {
+            it.revision_history = [{ rev: 1, date: new Date().toISOString(), editor: currentEditorName(), reason: 'Initial creation' }];
+        } else {
+            it.revision_history.push({
+                rev: it.revision_history.length + 1,
+                date: new Date().toISOString(),
+                editor: currentEditorName(),
+                reason: (revisionReason && revisionReason.trim()) || 'No reason provided'
+            });
+        }
         if (idx !== -1) out[idx] = it; else out.push(it);
     } else {
         it.id = nextFreeItemId(out);
@@ -2884,7 +2899,14 @@ async function finalizeSubmitToConsolidated(driveRef, revisionReason) {
     if (!base.revision_history) base.revision_history = [];
     const submittedSku = base.sku_no;
     // Use the id carried by the item being edited, not whatever sits at editingIdx now.
-    const editingItemId = (editingIdx !== null && editorItem && editorItem.id) ? String(editorItem.id) : null;
+    // Let the last live save land (and make sure the sheet row is current) before the final check.
+    clearTimeout(sdbLiveTimer);
+    while (sdbLiveBusy) await _sleep(150);
+    await sdbLiveSaveNow();
+    while (sdbLiveBusy) await _sleep(150);
+    const liveNew = !!(editorLiveId && editorLiveNew);
+    const editingItemId = editorLiveId ? String(editorLiveId)
+        : ((editingIdx !== null && editorItem && editorItem.id) ? String(editorItem.id) : null);
 
     if (!driveSessionIsLive()) return { ok: false, reason: 'Drive is not connected' };
 
@@ -2919,10 +2941,15 @@ async function finalizeSubmitToConsolidated(driveRef, revisionReason) {
             }
         }
 
+        if (editingItemId === null) {
+            const clash = fresh.main_items.find(x => (x.sku_no || '').trim().toLowerCase() === (base.sku_no || '').trim().toLowerCase());
+            if (clash) { hideSubmitBusy(); return { ok: false, reason: `an item with SKU "${base.sku_no}" already exists` }; }
+        }
         currentData.main_items = fresh.main_items;
         if (fresh.users) currentData.users = fresh.users;
         setItemBaseline(fresh.main_items);
-        const applied = applySubmittedItem(currentData.main_items, base, editingItemId, revisionReason);
+        const applied = applySubmittedItem(currentData.main_items, base, editingItemId, revisionReason, liveNew);
+        sdbClearStatusIds = new Set([String(applied.item.id)]);
         currentData.main_items = applied.list;
 
         const saved = await saveData(true);
@@ -2945,6 +2972,8 @@ async function finalizeSubmitToConsolidated(driveRef, revisionReason) {
 
     // ── Verified in Drive: only now reset the editor and delete the draft ──
     editingIdx = null;
+    editorLiveId = null; editorLiveNew = false;
+    sdbStatus.delete(String(verifiedItem.id));
     editorItem = createBlankItem((currentData.main_items.length + 1).toString());
     editorSnapshot = JSON.stringify(editorItem);
     await clearEditorDraft(submittedSku);
@@ -3388,12 +3417,20 @@ function wrapPhotoLink(url, innerHtml) {
 }
 
 function buildReportHTML(item) {
+    // Pages with nothing to show are skipped, so numbering is computed from what was actually rendered.
+    const html = buildReportHTMLRaw(item);
+    const total = (html.match(/@@PL@@/g) || []).length;
+    let n = 0;
+    return html.replace(/@@PL@@/g, () => `PAGE ${++n} OF ${total}`);
+}
+
+function buildReportHTMLRaw(item) {
     // Reusable photo box — enlarged to fill its cell/column, capped by a generous max-height
     // maxH is smaller (260) for the two 3-row / 6-photo layouts (Multi-Angle, Gift Box) so the
     // whole grid plus header/footer reliably fits within one Legal-size (1344px) printed page —
     // at the default 340px those two pages ran long enough to spill their footer onto a second,
     // otherwise-blank sheet. 4-photo grids (Master Carton, Inner Case) keep the larger default.
-    const photoBox = (src, label='', maxH=340) => `
+    const photoBox = (src, label='', maxH=340) => !src ? '' : `
         <div style="text-align:center;max-width:100%">
             ${label ? `<div style="font-size:10px;font-weight:700;color:#374151;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em">${label}</div>` : ''}
             <div style="width:100%;min-height:${Math.round(maxH*0.7)}px;max-height:${maxH}px;border:1px solid #d1d5db;border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f9fafb;box-sizing:border-box;padding:8px">
@@ -3469,7 +3506,7 @@ function buildReportHTML(item) {
     const numDrawingPages = item.show_drawing ? Math.max(itemDrawings.length, 1) : 0;
     const totalReportPages = 4 + numComponentPages + (item.show_other_components ? 1 : 0) + (item.show_compliance ? 1 : 0) + numCTQPages + (item.show_marketing ? 1 : 0) + (item.instructions_photo ? 1 : 0) + numDrawingPages + (item.show_authorization ? 1 : 0) + (item.show_inner_case ? 1 : 0);
     let reportPageNum = 1;
-    const pageLabel = () => `PAGE ${reportPageNum++} OF ${totalReportPages}`;
+    const pageLabel = () => '@@PL@@';
 
     // One dedicated page per BOM component (or a single placeholder page if none)
     const buildComponentPages = () => {
@@ -3500,13 +3537,13 @@ function buildReportHTML(item) {
                     <td colspan="5" style="background:#fff;border:1px solid #9ca3af;padding:6px 10px">${sub.country_of_origin}</td>
                 </tr>` : ''}
                 <tr>
-                    <td colspan="3" style="padding:12px;border:1px solid #9ca3af;text-align:center;vertical-align:top">
+                    ${sub.component_photo ? `<td colspan="3" style="padding:12px;border:1px solid #9ca3af;text-align:center;vertical-align:top">
                         <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px">COMPONENT PHOTO</div>
                         <div style="width:100%;min-height:280px;max-height:400px;border:1px solid #d1d5db;border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f9fafb;box-sizing:border-box;padding:10px">
                             ${sub.component_photo ? wrapPhotoLink(sub.component_photo, `<img src="${sub.component_photo}" style="max-width:100%;max-height:380px;object-fit:contain">`) : '<span style="color:#9ca3af;font-size:11px">—</span>'}
                         </div>
-                    </td>
-                    <td colspan="3" style="padding:12px;border:1px solid #9ca3af;vertical-align:top">
+                    </td>` : ''}
+                    <td colspan="${sub.component_photo ? 3 : 6}" style="padding:12px;border:1px solid #9ca3af;vertical-align:top">
                         <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px;text-align:center">MEASUREMENTS</div>
                         ${buildDimensionsTable(sub)}
                         ${sub.sub_remarks ? `<div style="margin-top:8px;padding:6px 8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;font-size:10px;color:#374151;white-space:normal;word-wrap:break-word;overflow-wrap:break-word;word-break:break-word"><span style="font-weight:700">Remarks:</span> ${sub.sub_remarks}</div>` : ''}
@@ -3543,19 +3580,19 @@ function buildReportHTML(item) {
                     <td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af;font-weight:700;font-size:12px">${cq.factor||'—'}</td>
                 </tr>
                 <tr>
-                    <td colspan="3" style="padding:12px;border:1px solid #9ca3af;vertical-align:top">
+                    <td colspan="${item['ctq_photo_'+qIdx] ? 3 : 6}" style="padding:12px;border:1px solid #9ca3af;vertical-align:top">
                         <div style="font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px;text-align:center">DETAILS</div>
                         <table style="width:100%;border-collapse:collapse;font-size:12px">
                             <tr><td style="padding:6px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700;width:35%">Description</td><td style="padding:6px 8px;border:1px solid #d1d5db;word-wrap:break-word;white-space:pre-wrap;line-height:1.4">${cq.description||'—'}</td></tr>
                             <tr><td style="padding:6px 8px;border:1px solid #d1d5db;background:#f9fafb;font-weight:700">Performance Criteria</td><td style="padding:6px 8px;border:1px solid #d1d5db;word-wrap:break-word;white-space:pre-wrap;line-height:1.4">${cq.criteria||'—'}</td></tr>
                         </table>
                     </td>
-                    <td colspan="3" style="padding:12px;border:1px solid #9ca3af;text-align:center;vertical-align:top">
+                    ${item['ctq_photo_'+qIdx] ? `<td colspan="3" style="padding:12px;border:1px solid #9ca3af;text-align:center;vertical-align:top">
                         <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px">VALIDATION PHOTO</div>
                         <div style="width:100%;min-height:280px;max-height:400px;border:1px solid #d1d5db;border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f9fafb;box-sizing:border-box;padding:10px">
                             ${item['ctq_photo_'+qIdx] ? wrapPhotoLink(item['ctq_photo_'+qIdx], `<img src="${item['ctq_photo_'+qIdx]}" style="max-width:100%;max-height:380px;object-fit:contain">`) : '<span style="color:#9ca3af;font-size:11px">—</span>'}
                         </div>
-                    </td>
+                    </td>` : ''}
                 </tr>
         `) : [`<tr><td colspan="6" style="padding:20px;border:1px solid #9ca3af;color:#9ca3af;font-style:italic;text-align:center">No CTQ data entered yet.</td></tr>`];
         // Group CTQ entries into chunks of CTQ_PER_PAGE so at most that many share one printed
@@ -3612,6 +3649,8 @@ function buildReportHTML(item) {
     // One page per named drawing (or a single placeholder page if none have been added yet).
     const buildDrawingPages = () => {
         if (!item.show_drawing) return '';
+        const drawingsWithPhoto = itemDrawings.filter(d => d.photo);
+        if (!drawingsWithPhoto.length) return '';
         const drawingHeaderRow = (name) => `<tr style="background:#111827"><td colspan="6" style="padding:8px;border:1px solid #374151;text-align:center;font-weight:900;font-size:11px;color:#fff;letter-spacing:0.05em">PRODUCT DRAWING — ENGINEERING BLUEPRINT${name ? ' — ' + name : ''}</td></tr>`;
         const pageBody = (headerRow, bodyHtml) => `
     <div class="report-page">
@@ -3628,10 +3667,10 @@ function buildReportHTML(item) {
         <img src="${REPORT_LETTERHEAD_FOOTER}" style="width:calc(100% + 60px);max-width:none;display:block;margin:14px -30px -20px -30px">
         </div>
     </div>`;
-        if (!itemDrawings.length) {
+        if (false) {
             return pageBody(drawingHeaderRow(''), `<div style="padding:60px 20px;color:#9ca3af;font-style:italic;font-size:12px">No engineering drawing uploaded yet. Paste a drawing image using the [+] Engineering Blueprint section in the editor.</div>`);
         }
-        return itemDrawings.map(dr => pageBody(
+        return drawingsWithPhoto.map(dr => pageBody(
             drawingHeaderRow(dr.name || ''),
             dr.photo
                 ? wrapPhotoLink(dr.photo, `<img src="${dr.photo}" style="max-width:100%;max-height:700px;object-fit:contain">`)
@@ -3687,15 +3726,19 @@ function buildReportHTML(item) {
             </tr>
 
             <!-- MAIN PRODUCT PHOTOS (stacked, full width, larger) -->
+            ${item.product_photo ? `
             <tr style="background:#e5e7eb"><td colspan="6" style="padding:8px;border:1px solid #9ca3af;text-align:center;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#111827">MARKETING IMAGE</td></tr>
             <tr><td colspan="6" style="padding:16px;border:1px solid #9ca3af;text-align:center">${photoBox(item.product_photo)}</td></tr>
+            ` : ''}
             <tr style="background:#e5e7eb"><td colspan="6" style="padding:8px;border:1px solid #9ca3af;text-align:center;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#111827">PACKAGE CONTENT</td></tr>
             <tr>
+                ${item.pkg_content_photo ? `
                 <td colspan="4" style="padding:12px;border:1px solid #9ca3af;text-align:center;vertical-align:top">
                     <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px">PACKAGE CONTENT IMAGE</div>
                     ${photoBox(item.pkg_content_photo)}
                 </td>
-                <td colspan="2" style="padding:12px;border:1px solid #9ca3af;vertical-align:top">
+                ` : ''}
+                <td colspan="${item.pkg_content_photo ? 2 : 6}" style="padding:12px;border:1px solid #9ca3af;vertical-align:top">
                     <div style="font-size:9px;font-weight:700;color:#374151;text-transform:uppercase;margin-bottom:8px;text-align:center">INCLUSION</div>
                     <table style="width:100%;border-collapse:collapse;font-size:10px">
                         <tr style="background:#f3f4f6;font-weight:700;color:#374151">
@@ -3716,40 +3759,31 @@ function buildReportHTML(item) {
         </div>
     </div>
 
+    ${(() => {
+        const pairs = [['front_photo','FRONT VIEW','rear_photo','REAR VIEW'],['left_photo','LEFT VIEW','right_photo','RIGHT VIEW'],['top_photo','TOP VIEW','bottom_photo','BOTTOM VIEW']];
+        const rows = pairs.map(([k1,l1,k2,l2]) => {
+            const a = item[k1], b = item[k2];
+            if (!a && !b) return '';
+            const cs = (a && b) ? 3 : 6;
+            const lab = (txt) => `<td colspan="${cs}" style="padding:5px;border:1px solid #9ca3af">${txt}</td>`;
+            const pho = (k) => `<td colspan="${cs}" style="padding:8px;border:1px solid #9ca3af;text-align:center">${photoBox(item[k],'',260)}</td>`;
+            return `<tr style="background:#f3f4f6;text-align:center;font-size:9px;font-weight:700;color:#374151">${a?lab(l1):''}${b?lab(l2):''}</tr><tr>${a?pho(k1):''}${b?pho(k2):''}</tr>`;
+        }).join('');
+        if (!rows) return '';
+        return `
     <div class="report-page">
     <div class="page-label">${pageLabel()}</div>
     <div style="background:#fff;padding:20px">
         <img src="${REPORT_LETTERHEAD_HEADER}" style="width:calc(100% + 60px);max-width:none;display:block;margin:-20px -30px 14px -30px">
         <table style="width:100%;border-collapse:collapse;border:1px solid #9ca3af;table-layout:fixed">
-
-            <!-- MULTI-ANGLE (2 columns x 3 rows: Front/Rear, Left/Right, Top/Bottom) -->
             <tr style="background:#e5e7eb"><td colspan="6" style="padding:8px;border:1px solid #9ca3af;text-align:center;font-weight:900;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#111827">MULTI-ANGLE ELEVATION ARCHIVE</td></tr>
-            <tr style="background:#f3f4f6;text-align:center;font-size:9px;font-weight:700;color:#374151">
-                <td colspan="3" style="padding:5px;border:1px solid #9ca3af">FRONT VIEW</td>
-                <td colspan="3" style="padding:5px;border:1px solid #9ca3af">REAR VIEW</td>
-            </tr>
-            <tr>
-                ${['front_photo','rear_photo'].map(k=>`<td colspan="3" style="padding:8px;border:1px solid #9ca3af;text-align:center">${photoBox(item[k],'',260)}</td>`).join('')}
-            </tr>
-            <tr style="background:#f3f4f6;text-align:center;font-size:9px;font-weight:700;color:#374151">
-                <td colspan="3" style="padding:5px;border:1px solid #9ca3af">LEFT VIEW</td>
-                <td colspan="3" style="padding:5px;border:1px solid #9ca3af">RIGHT VIEW</td>
-            </tr>
-            <tr>
-                ${['left_photo','right_photo'].map(k=>`<td colspan="3" style="padding:8px;border:1px solid #9ca3af;text-align:center">${photoBox(item[k],'',260)}</td>`).join('')}
-            </tr>
-            <tr style="background:#f3f4f6;text-align:center;font-size:9px;font-weight:700;color:#374151">
-                <td colspan="3" style="padding:5px;border:1px solid #9ca3af">TOP VIEW</td>
-                <td colspan="3" style="padding:5px;border:1px solid #9ca3af">BOTTOM VIEW</td>
-            </tr>
-            <tr>
-                ${['top_photo','bottom_photo'].map(k=>`<td colspan="3" style="padding:8px;border:1px solid #9ca3af;text-align:center">${photoBox(item[k],'',260)}</td>`).join('')}
-            </tr>
+            ${rows}
         </table>
         <div style="flex:1 0 auto"></div>
         <img src="${REPORT_LETTERHEAD_FOOTER}" style="width:calc(100% + 60px);max-width:none;display:block;margin:14px -30px -20px -30px">
         </div>
-    </div>
+    </div>`;
+    })()}
 
     ${item.show_master_carton!==false ? `
     <div class="report-page">
@@ -3772,13 +3806,13 @@ function buildReportHTML(item) {
             </tr>
             <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Qty per Carton:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af">${item.mc_qty||'—'}${item.mc_qty_uom?' '+item.mc_qty_uom:''}</td></tr>
             ${item.show_mc_remarks!==false ? `<tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Carton Remarks:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af;font-style:italic">${item.mc_remarks||'—'}</td></tr>` : ''}
-            <tr>
+            ${masterCartonPhotoKeys.some(p=>item[p.key]) ? `<tr>
                 <td colspan="6" style="padding:16px;border:1px solid #9ca3af">
-                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px">
+                    <div style="display:grid;grid-template-columns:repeat(${masterCartonPhotoKeys.filter(p=>item[p.key]).length>1?2:1},1fr);gap:16px">
                         ${masterCartonPhotoKeys.map(p=>photoBox(item[p.key], p.label)).join('')}
                     </div>
                 </td>
-            </tr>
+            </tr>` : ''}
         </table>
         <div style="flex:1 0 auto"></div>
         <img src="${REPORT_LETTERHEAD_FOOTER}" style="width:calc(100% + 60px);max-width:none;display:block;margin:14px -30px -20px -30px">
@@ -3806,13 +3840,13 @@ function buildReportHTML(item) {
             </tr>
             <tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Qty per Case:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af">${item.ic_qty||'—'}${item.ic_qty_uom?' '+item.ic_qty_uom:''}</td></tr>
             ${item.show_ic_remarks!==false ? `<tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Case Remarks:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af;font-style:italic">${item.ic_remarks||'—'}</td></tr>` : ''}
-            <tr>
+            ${innerCasePhotoKeys.some(p=>item[p.key]) ? `<tr>
                 <td colspan="6" style="padding:16px;border:1px solid #9ca3af">
-                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px">
+                    <div style="display:grid;grid-template-columns:repeat(${innerCasePhotoKeys.filter(p=>item[p.key]).length>1?2:1},1fr);gap:16px">
                         ${innerCasePhotoKeys.map(p=>photoBox(item[p.key], p.label)).join('')}
                     </div>
                 </td>
-            </tr>
+            </tr>` : ''}
         </table>
         <div style="flex:1 0 auto"></div>
         <img src="${REPORT_LETTERHEAD_FOOTER}" style="width:calc(100% + 60px);max-width:none;display:block;margin:14px -30px -20px -30px">
@@ -3842,13 +3876,13 @@ function buildReportHTML(item) {
                 <td colspan="3" style="padding:6px 10px;border:1px solid #9ca3af">${item.gb_artwork?`<a href="${item.gb_artwork}" style="color:#2563eb;text-decoration:underline">Open Artwork File</a>`:'—'}</td>` : ''}
             </tr>
             ${item.show_gb_remarks!==false ? `<tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Box Remarks:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af;font-style:italic">${item.gb_remarks||'—'}</td></tr>` : ''}
-            <tr>
+            ${giftBoxPhotoKeys.some(p=>item[p.key]) ? `<tr>
                 <td colspan="6" style="padding:10px;border:1px solid #9ca3af">
-                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">
+                    <div style="display:grid;grid-template-columns:repeat(${giftBoxPhotoKeys.filter(p=>item[p.key]).length>1?2:1},1fr);gap:10px">
                         ${giftBoxPhotoKeys.map(p=>photoBox(item[p.key], p.label, 260)).join('')}
                     </div>
                 </td>
-            </tr>
+            </tr>` : ''}
         </table>
         <div style="flex:1 0 auto"></div>
         <img src="${REPORT_LETTERHEAD_FOOTER}" style="width:calc(100% + 60px);max-width:none;display:block;margin:14px -30px -20px -30px">
@@ -6197,6 +6231,899 @@ window.addEventListener('offline', () => {
 window.addEventListener('online', () => {
     if (gdriveEnabled && gdriveToken) { showToast('✅', 'Back online — syncing your changes to Drive…'); saveData(); }
 });
+</script>
+<script>
+// ===== SHARED SHEET-DB CORE (identical in Apps Script and in the web app) =====
+var SDB_DATA_CHUNK = 40000;   // Sheets allows 50,000 chars per cell
+var SDB_FIELD_COLS = [
+  ['ID','id'],['SKU','sku_no'],['Description','description'],['Priority SKU','priority_sku'],['ASIN','asin'],['UPC','upc'],['GTIN','gtin'],
+  ['Last Updated','date'],['PDF Report Link','drive_pdf_url'],
+  ['Master Carton L (cm)','mc_l'],['Master Carton W (cm)','mc_w'],['Master Carton H (cm)','mc_h'],['Master Carton Weight','mc_weight'],
+  ['Master Carton Qty','mc_qty'],['Master Carton UoM','mc_qty_uom'],['Master Carton Remarks','mc_remarks'],
+  ['Gift Box L (cm)','gb_l'],['Gift Box W (cm)','gb_w'],['Gift Box H (cm)','gb_h'],['Gift Box Weight','gb_weight'],['Gift Box Qty','gb_qty'],
+  ['Gift Box Artwork Link','gb_artwork'],['Gift Box Remarks','gb_remarks'],
+  ['Inner Case L (cm)','ic_l'],['Inner Case W (cm)','ic_w'],['Inner Case H (cm)','ic_h'],['Inner Case Weight','ic_weight'],['Inner Case Qty','ic_qty'],
+  ['Inner Case UoM','ic_qty_uom'],['Inner Case Remarks','ic_remarks'],['Photo Remarks','photo_remarks']
+];
+var SDB_BOOL_COLS = [
+  ['Show Master Carton','show_master_carton'],['Show Gift Box','show_gift_box'],['Show Inner Case','show_inner_case'],['Show CTQ','show_ctq'],
+  ['Show Compliance','show_compliance'],['Show Drawing','show_drawing'],['Show Marketing','show_marketing'],
+  ['Show Other Components','show_other_components'],['Show Authorization','show_authorization']
+];
+function sdbNorm(h) { return String(h == null ? '' : h).trim().toLowerCase(); }
+function sdbStr(v) { return v == null ? '' : String(v); }
+function sdbChunks(str) { var out = []; for (var i = 0; i < str.length; i += SDB_DATA_CHUNK) out.push(str.slice(i, i + SDB_DATA_CHUNK)); return out.length ? out : ['']; }
+function sdbDataColIndexes(headers) {            // [{n:1,idx:..}, ...] sorted by n
+  var r = [];
+  headers.forEach(function (h, i) { var m = /^data\s*(\d+)$/i.exec(String(h || '').trim()); if (m) r.push({ n: parseInt(m[1], 10), idx: i }); });
+  return r.sort(function (a, b) { return a.n - b.n; });
+}
+function sdbHasEmbedded(item) { return JSON.stringify(item).indexOf('data:image') !== -1; }
+function sdbStripEmbedded(o) {                    // used only by the importer: embedded photos can't live in a cell
+  if (typeof o === 'string') return o.indexOf('data:image') === 0 ? '' : o;
+  if (Array.isArray(o)) return o.map(sdbStripEmbedded);
+  if (o && typeof o === 'object') { var out = {}; Object.keys(o).forEach(function (k) { out[k] = sdbStripEmbedded(o[k]); }); return out; }
+  return o;
+}
+// One Items row, aligned to the sheet's CURRENT headers. extras = values of columns the app doesn't know about.
+function sdbItemRow(item, headers, extras) {
+  var fieldBy = {}, boolBy = {};
+  SDB_FIELD_COLS.forEach(function (p) { fieldBy[sdbNorm(p[0])] = p[1]; });
+  SDB_BOOL_COLS.forEach(function (p) { boolBy[sdbNorm(p[0])] = p[1]; });
+  var rh = item.revision_history || [], last = rh.length ? rh[rh.length - 1] : {};
+  var chunks = sdbChunks(JSON.stringify(item));
+  var dataCols = sdbDataColIndexes(headers), dataPos = {};
+  dataCols.forEach(function (d) { dataPos[d.idx] = d.n; });
+  return headers.map(function (h, i) {
+    var k = sdbNorm(h);
+    if (dataPos[i]) return chunks[dataPos[i] - 1] || '';
+    if (fieldBy[k]) return sdbStr(item[fieldBy[k]]);
+    if (boolBy[k]) return item[boolBy[k]] ? 'Yes' : 'No';
+    if (k === 'revisions') return rh.length;
+    if (k === 'last editor') return sdbStr(last.editor);
+    if (k === 'last revision reason') return sdbStr(last.reason);
+    return extras && extras[h] != null ? extras[h] : '';
+  });
+}
+// ---- Derived, human-readable detail tabs ----
+var SDB_DETAIL_HEADERS = {
+  'Package Contents': ['ID','SKU','Qty','Item'],
+  'Components': ['ID','SKU','#','Description','Material','Color','Reliability Test','Remarks','Length (cm)','Width (cm)','Height (cm)','Thickness (cm)','Weight (kg)','Volume (oz/L)','Circumference (cm)','Elevation/Angle','Length (in)','Width (in)','Height (in)','Thickness (in)','Circumference (in)','Country of Origin','Extra Measurements'],
+  'CTQ': ['ID','SKU','#','Factor','Description','Criteria'],
+  'Compliance': ['ID','SKU','#','Test','Standard','Criteria','Requirements'],
+  'Features & Benefits': ['ID','SKU','Type','#','Text'],
+  'Other Components': ['ID','SKU','#','Item','Description','Material'],
+  'Revision History': ['ID','SKU','Rev','Date (UTC)','Editor','Reason']
+};
+function sdbExtraText(c) {
+  return (c.extra_measurements || []).map(function (e) {
+    var parts = [];
+    [['L','dim_l_cm'],['W','dim_w_cm'],['H','dim_h_cm'],['T','thickness_cm'],['WT','weight_kg'],['V','volume_oz_l'],['C','circumference_cm'],['A','elevation_angle']].forEach(function (p) { if (e[p[1]]) parts.push(p[0] + e[p[1]]); });
+    return (e.name || 'Item') + ': ' + parts.join(', ');
+  }).join(' | ');
+}
+function sdbDetailRows(item) {
+  var id = sdbStr(item.id), sku = sdbStr(item.sku_no), out = {};
+  Object.keys(SDB_DETAIL_HEADERS).forEach(function (k) { out[k] = []; });
+  (item.package_contents || []).forEach(function (p) { out['Package Contents'].push([id, sku, sdbStr(p.qty), sdbStr(p.name)]); });
+  (item.components || []).forEach(function (c, i) {
+    out['Components'].push([id, sku, i + 1, sdbStr(c.description), sdbStr(c.material), sdbStr(c.color), sdbStr(c.reliability_test), sdbStr(c.sub_remarks),
+      sdbStr(c.dim_l_cm), sdbStr(c.dim_w_cm), sdbStr(c.dim_h_cm), sdbStr(c.thickness_cm), sdbStr(c.weight_kg), sdbStr(c.volume_oz_l), sdbStr(c.circumference_cm), sdbStr(c.elevation_angle),
+      sdbStr(c.dim_l_in), sdbStr(c.dim_w_in), sdbStr(c.dim_h_in), sdbStr(c.thickness_in), sdbStr(c.circumference_in), sdbStr(c.country_of_origin), sdbExtraText(c)]);
+  });
+  (item.ctq || []).forEach(function (c, i) { out['CTQ'].push([id, sku, i + 1, sdbStr(c.factor), sdbStr(c.description), sdbStr(c.criteria)]); });
+  (item.compliance || []).forEach(function (c, i) { out['Compliance'].push([id, sku, i + 1, sdbStr(c.test), sdbStr(c.standard), sdbStr(c.criteria), sdbStr(c.requirements)]); });
+  (item.features || []).forEach(function (f, i) { out['Features & Benefits'].push([id, sku, 'Feature', i + 1, sdbStr(f.text)]); });
+  (item.benefits || []).forEach(function (f, i) { out['Features & Benefits'].push([id, sku, 'Benefit', i + 1, sdbStr(f.text)]); });
+  (item.other_components || []).forEach(function (c, i) { out['Other Components'].push([id, sku, i + 1, sdbStr(c.item), sdbStr(c.component_desc), sdbStr(c.material)]); });
+  (item.revision_history || []).forEach(function (r) { out['Revision History'].push([id, sku, sdbStr(r.rev), sdbStr(r.date), sdbStr(r.editor), sdbStr(r.reason)]); });
+  return out;
+}
+// ===== END SHARED CORE =====
+
+// ============================================================
+// SHEET-BACKED DATABASE LAYER
+// Replaces the JSON-file load/save with the Google Sheet "RHINO Spec Database (Google Sheet)".
+// Items tab = one row per item (flat columns editable by hand + hidden "Data n" columns holding
+// the full item). The other tabs are auto-generated readable views, rebuilt after each save.
+// ============================================================
+const SDB_ID = '1felCNek_LBK4M7rneEDkV88nKis0gxqOskBixIYBVy8';
+const SDB_API = 'https://sheets.googleapis.com/v4/spreadsheets/' + SDB_ID;
+const sdbEnc = encodeURIComponent;
+let sdbExtras = new Map();           // item id -> {header: value} for columns this app doesn't know
+let sdbLastLoadFailed = false;
+let sdbNoData = new Set();            // ids of rows that have no Data yet (blank-derived) — never used to rebuild detail tabs
+let sdbStatus = new Map();           // item id -> 'In progress – by X' (from the Status column)
+
+function sdbColLetter(idx) { let s = '', n = idx + 1; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+function sdbHeaderMaps(headers) {
+    const fieldBy = {}, boolBy = {};
+    SDB_FIELD_COLS.forEach(p => { fieldBy[sdbNorm(p[0])] = p[1]; });
+    SDB_BOOL_COLS.forEach(p => { boolBy[sdbNorm(p[0])] = p[1]; });
+    return { fieldBy, boolBy };
+}
+const SDB_DERIVED = new Set(['revisions', 'last editor', 'last revision reason']);
+
+async function loadFromDriveFile() {
+    if (!gdriveEnabled || !gdriveToken) return null;
+    try {
+        const r = await gdriveFetch(`${SDB_API}/values/Items?valueRenderOption=FORMATTED_VALUE`);
+        const rows = (r && r.values) || [];
+        if (!rows.length) return { main_items: [], users: (currentData && currentData.users && currentData.users.length) ? currentData.users : [...DEFAULT_USERS] };
+        const headers = rows[0].map(String);
+        const norm = headers.map(sdbNorm);
+        const { fieldBy, boolBy } = sdbHeaderMaps(headers);
+        const dataCols = sdbDataColIndexes(headers);
+        const idCol = norm.indexOf('id');
+        const items = [];
+        const extrasMap = new Map();
+        const newStatus = new Map();
+        const noData = new Set();
+        let bad = 0;
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i] || [];
+            const cell = (c) => sdbStr(row[c]);
+            const rowId = idCol >= 0 ? cell(idCol).trim() : '';
+            const rowSku = (norm.indexOf('sku') >= 0 ? cell(norm.indexOf('sku')).trim() : '');
+            if (!rowId && !rowSku) continue;
+            const dataStr = dataCols.map(d => cell(d.idx)).join('');
+            let item = null;
+            if (dataStr) { try { item = JSON.parse(dataStr); } catch (e) { bad++; } }
+            if (!item) { item = createBlankItem(rowId || String(items.length + 1)); noData.add(String(rowId || items.length + 1)); }
+            const extras = {};
+            headers.forEach((h, c) => {
+                const k = norm[c];
+                if (fieldBy[k]) {
+                    const v = cell(c), cur = sdbStr(item[fieldBy[k]]);
+                    if (v !== cur) item[fieldBy[k]] = v;                 // the sheet wins
+                } else if (boolBy[k]) {
+                    const v = cell(c).trim().toLowerCase();
+                    if (v === 'yes' || v === 'no') { const b = v === 'yes'; if (!!item[boolBy[k]] !== b) item[boolBy[k]] = b; }
+                } else if (!SDB_DERIVED.has(k) && !/^data\s*\d+$/i.test(h) && h) {
+                    extras[h] = cell(c);
+                }
+            });
+            if (rowId) item.id = rowId;
+            if (!item.id) item.id = String(items.length + 1);
+            item.id = String(item.id);
+            extrasMap.set(item.id, extras);
+            const stKey = Object.keys(extras).find(k => sdbNorm(k) === 'status');
+            if (stKey && extras[stKey]) newStatus.set(item.id, extras[stKey]);
+            items.push(item);
+        }
+        sdbExtras = extrasMap;
+        sdbStatus = newStatus;
+        sdbNoData = noData;
+        if (bad) console.warn(`Sheet load: ${bad} row(s) had unreadable Data; their visible columns were used.`);
+        sdbLastLoadFailed = false;
+        return { main_items: items, users: (currentData && currentData.users && currentData.users.length) ? currentData.users : [...DEFAULT_USERS] };
+    } catch (err) {
+        console.error('Sheet load error:', err);
+        sdbLastLoadFailed = true;
+        setStatus('❌ Could not load from the Google Sheet: ' + err.message, 'text-red-400');
+        return null;
+    }
+}
+
+async function sdbMeta() {
+    return gdriveFetch(`${SDB_API}?fields=sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))`);
+}
+async function sdbEnsureGrid(meta, title, rows, cols) {
+    const sh = (meta.sheets || []).find(s => s.properties.title === title);
+    if (!sh) throw new Error(`Tab "${title}" not found in the Google Sheet`);
+    const reqs = [];
+    const g = sh.properties.gridProperties;
+    if (rows > g.rowCount) reqs.push({ appendDimension: { sheetId: sh.properties.sheetId, dimension: 'ROWS', length: rows - g.rowCount + 50 } });
+    if (cols > g.columnCount) reqs.push({ appendDimension: { sheetId: sh.properties.sheetId, dimension: 'COLUMNS', length: cols - g.columnCount } });
+    if (reqs.length) await gdriveFetch(`${SDB_API}:batchUpdate`, 'POST', { requests: reqs });
+    return sh.properties.sheetId;
+}
+
+async function saveToDrive(data, forceSnapshot = false) {
+    if (!gdriveEnabled || !gdriveToken) return false;
+    try {
+        const items = data.main_items || [];
+        const changed = items.filter(it => JSON.stringify(it) !== itemBaseline.get(String(it.id)));
+        const deletedIds = [...recentlyDeletedIds].map(String).filter(id => !items.some(it => String(it.id) === id));
+        if (changed.some(sdbHasEmbedded)) {
+            setStatus('❌ An item still has an embedded photo — it must be uploaded to Drive first', 'text-red-400');
+            return false;
+        }
+        if (!changed.length && !deletedIds.length) return true;
+
+        // current layout of the Items tab
+        const hr = await gdriveFetch(`${SDB_API}/values/${sdbEnc('Items!1:1')}`);
+        let headers = ((hr.values || [[]])[0] || []).map(String);
+        const idx = () => headers.map(sdbNorm).indexOf('id');
+        if (idx() < 0) throw new Error('The Items tab has no "ID" column');
+
+        // make sure there are enough hidden Data columns
+        const needChunks = changed.reduce((m, it) => Math.max(m, sdbChunks(JSON.stringify(it)).length), 1);
+        const haveChunks = sdbDataColIndexes(headers).length;
+        const meta = await sdbMeta();
+        if (needChunks > haveChunks) {
+            for (let n = haveChunks + 1; n <= needChunks; n++) headers.push('Data ' + n);
+            await sdbEnsureGrid(meta, 'Items', 1, headers.length);
+            await gdriveFetch(`${SDB_API}/values/${sdbEnc('Items!A1')}?valueInputOption=RAW`, 'PUT', { values: [headers] });
+        }
+        const itemsSheetId = (meta.sheets.find(s => s.properties.title === 'Items')).properties.sheetId;
+
+        // where each existing item lives
+        const idL = sdbColLetter(idx());
+        const idr = await gdriveFetch(`${SDB_API}/values/${sdbEnc(`Items!${idL}2:${idL}`)}`);
+        const rowById = new Map();
+        (idr.values || []).forEach((v, i) => { const id = sdbStr(v && v[0]).trim(); if (id) rowById.set(id, i + 2); });
+
+        const updates = [], appends = [];
+        changed.forEach(it => {
+            const id = String(it.id);
+            const ex = Object.assign({}, sdbExtras.get(id) || {});
+            if (sdbClearStatusIds.has(id)) { const k = headers[headers.map(sdbNorm).indexOf('status')]; if (k) ex[k] = ''; }
+            const rowArr = sdbItemRow(it, headers, ex);
+            if (rowById.has(id)) updates.push({ range: `Items!A${rowById.get(id)}`, values: [rowArr] });
+            else appends.push(rowArr);
+        });
+        // updates in ~1.5MB batches
+        let batch = [], size = 0;
+        const flush = async () => { if (batch.length) { await gdriveFetch(`${SDB_API}/values:batchUpdate`, 'POST', { valueInputOption: 'RAW', data: batch }); batch = []; size = 0; } };
+        for (const u of updates) { const s = JSON.stringify(u).length; if (size + s > 1500000) await flush(); batch.push(u); size += s; }
+        await flush();
+        if (appends.length) await gdriveFetch(`${SDB_API}/values/${sdbEnc('Items!A1')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, 'POST', { values: appends });
+
+        // deletions last, highest row first so numbers don't shift under us
+        const delRows = deletedIds.map(id => rowById.get(id)).filter(Boolean).sort((a, b) => b - a);
+        if (delRows.length) {
+            await gdriveFetch(`${SDB_API}:batchUpdate`, 'POST', { requests: delRows.map(r => ({ deleteDimension: { range: { sheetId: itemsSheetId, dimension: 'ROWS', startIndex: r - 1, endIndex: r } } })) });
+        }
+
+        // quick check: every changed item's id is now in the ID column
+        const chk = await gdriveFetch(`${SDB_API}/values/${sdbEnc(`Items!${idL}2:${idL}`)}`);
+        const present = new Set((chk.values || []).map(v => sdbStr(v && v[0]).trim()));
+        const missing = changed.filter(it => !present.has(String(it.id)));
+        if (missing.length) { console.error('Sheet save check failed for', missing.map(m => m.sku_no)); setStatus('❌ Sheet save could not be verified', 'text-red-400'); return false; }
+
+        sdbClearStatusIds = new Set();
+        sdbScheduleDetailRebuild(items);
+        return true;
+    } catch (err) {
+        console.error('Sheet save error:', err);
+        setStatus('❌ Sheet error: ' + err.message, 'text-red-400');
+        return false;
+    }
+}
+async function snapshotCurrentDriveFileIfDue() { /* Google Sheets keeps its own version history (File → Version history) */ }
+
+// ---- auto-generated detail tabs (best effort, never blocks a save) ----
+let sdbDetailRunning = false, sdbDetailPending = null;
+function sdbScheduleDetailRebuild(items) {
+    // Only items whose full data really exists in the sheet. If most rows have no Data yet (the sheet sync
+    // hasn't filled them), skip entirely so the readable tabs are never overwritten with blanks.
+    const good = items.filter(it => !sdbNoData.has(String(it.id)));
+    if (!good.length || good.length < items.length * 0.5) { console.warn('Detail tab refresh skipped: most rows have no Data yet. Run "Sync now" in the sheet.'); return; }
+    sdbDetailPending = JSON.parse(JSON.stringify(good));
+    if (sdbDetailRunning) return;
+    (async () => {
+        sdbDetailRunning = true;
+        try {
+            while (sdbDetailPending) {
+                const list = sdbDetailPending; sdbDetailPending = null;
+                const tables = {};
+                Object.keys(SDB_DETAIL_HEADERS).forEach(k => { tables[k] = [SDB_DETAIL_HEADERS[k]]; });
+                list.forEach(it => { const d = sdbDetailRows(it); Object.keys(d).forEach(k => d[k].forEach(r => tables[k].push(r))); });
+                const meta = await sdbMeta();
+                for (const k of Object.keys(tables)) await sdbEnsureGrid(meta, k, tables[k].length + 5, tables[k][0].length);
+                await gdriveFetch(`${SDB_API}/values:batchClear`, 'POST', { ranges: Object.keys(tables).map(k => `'${k}'!A2:ZZ`) });
+                await gdriveFetch(`${SDB_API}/values:batchUpdate`, 'POST', { valueInputOption: 'RAW', data: Object.keys(tables).map(k => ({ range: `'${k}'!A1`, values: tables[k] })) });
+            }
+        } catch (e) { console.warn('Detail tab refresh failed:', e.message); }
+        finally { sdbDetailRunning = false; }
+    })();
+}
+console.log('Sheet-backed database layer active');
+
+// ============================================================
+// EXIT with unsaved changes: Submit now / Keep editing / Discard draft
+// ============================================================
+function askThree({ title, sub, a, b, c }) {
+    return new Promise(resolve => {
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;z-index:99995;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:20px;font-family:Arial,sans-serif';
+        const done = (v) => { ov.remove(); resolve(v); };
+        ov.innerHTML = `<div style="background:#111827;border:1px solid #374151;border-radius:14px;max-width:440px;width:100%;padding:22px;color:#e5e7eb">
+            <div style="font-weight:900;font-size:15px;margin-bottom:6px">${escHtmlS(title)}</div>
+            <div style="font-size:12px;color:#9ca3af;line-height:1.5;margin-bottom:16px">${escHtmlS(sub)}</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+                <button data-v="a" style="background:#44D62C;color:#000;font-weight:900;border:0;border-radius:9px;padding:9px;cursor:pointer;font-size:13px">${escHtmlS(a)}</button>
+                <button data-v="b" style="background:#1f2937;color:#e5e7eb;border:1px solid #374151;border-radius:9px;padding:9px;cursor:pointer;font-size:13px;font-weight:700">${escHtmlS(b)}</button>
+                <button data-v="c" style="background:transparent;color:#f87171;border:1px solid #7f1d1d;border-radius:9px;padding:9px;cursor:pointer;font-size:13px;font-weight:700">${escHtmlS(c)}</button>
+            </div></div>`;
+        ov.querySelectorAll('button').forEach(btn => btn.onclick = () => done(btn.getAttribute('data-v')));
+        document.body.appendChild(ov);
+    });
+}
+(function installExit() {
+    const orig = window.exitEditor;
+    window.exitEditor = async function () {
+        if (!editorHasChanges()) return orig.apply(this, arguments);        // nothing to lose: original behaviour
+        const pick = await askThree({
+            title: 'You have unsaved changes',
+            sub: 'Submit them now, keep editing, or discard this draft. Discarding removes your draft and any unfinished row it created in the sheet.',
+            a: 'Submit now', b: 'Keep editing', c: 'Discard draft'
+        });
+        if (pick === 'a') { submitToConsolidated(true); return; }
+        if (pick !== 'c') return;
+        const sku = editorItem && editorItem.sku_no;
+        showSubmitBusy('Discarding draft…');
+        try {
+            await sdbAbandonLive();                 // new item: delete its row; existing item: put the original back
+            try { await clearEditorDraft(sku); } catch (e) {}
+        } finally { hideSubmitBusy(); }
+        editingIdx = null;
+        editorItem = createBlankItem((currentData.main_items.length + 1).toString());
+        editorSnapshot = JSON.stringify(editorItem);
+        updateEditTabVisibility();
+        switchSheet('consolidated');
+        buildConsolidatedView();
+        showToast('🗑', 'Draft discarded.');
+    };
+})();
+
+
+// ============================================================
+// DRAFTS IN THE GOOGLE SHEET — a "Drafts" tab (one row per in-progress item per person) replaces the old Drive
+// Draft-*.json files. Photos stay in Drive; everything else about a draft lives in the sheet.
+// ============================================================
+const SDB_DRAFT_TAB = 'Drafts';
+const SDB_DRAFT_COLS = ['Key', 'User', 'Item', 'Saved At'].concat(Array.from({ length: 12 }, (_, i) => 'Data ' + (i + 1)));
+let sdbDraftsReady = false;
+async function sdbDraftsEnsure() {
+    if (sdbDraftsReady) return;
+    const meta = await sdbMeta();
+    if (!(meta.sheets || []).some(s => s.properties.title === SDB_DRAFT_TAB)) {
+        await gdriveFetch(`${SDB_API}:batchUpdate`, 'POST', { requests: [{ addSheet: { properties: { title: SDB_DRAFT_TAB, gridProperties: { rowCount: 200, columnCount: SDB_DRAFT_COLS.length, frozenRowCount: 1 } } } }] });
+        await gdriveFetch(`${SDB_API}/values/${sdbEnc(SDB_DRAFT_TAB + '!A1')}?valueInputOption=RAW`, 'PUT', { values: [SDB_DRAFT_COLS] });
+    }
+    sdbDraftsReady = true;
+}
+async function sdbDraftKeys() {
+    await sdbDraftsEnsure();
+    const r = await gdriveFetch(`${SDB_API}/values/${sdbEnc(SDB_DRAFT_TAB + '!A2:A')}`);
+    return (r.values || []).map((v, i) => ({ key: sdbStr(v && v[0]), row: i + 2 }));
+}
+async function sdbDeleteDraftByKey(key) {
+    if (!key || !driveSessionIsLive()) return;
+    const keys = (await sdbDraftKeys()).filter(k => k.key === key).sort((a, b) => b.row - a.row);
+    if (!keys.length) return;
+    const meta = await sdbMeta();
+    const sid = meta.sheets.find(s => s.properties.title === SDB_DRAFT_TAB).properties.sheetId;
+    await gdriveFetch(`${SDB_API}:batchUpdate`, 'POST', { requests: keys.map(k => ({ deleteDimension: { range: { sheetId: sid, dimension: 'ROWS', startIndex: k.row - 1, endIndex: k.row } } })) });
+}
+async function syncDraftToDrive() {
+    if (!editorItem || !isDraftMeaningful(editorItem)) return;
+    if (!gdriveEnabled || !gdriveToken) { setEditorDriveStatus('offline'); return; }
+    if (draftSyncInFlight) return;
+    draftSyncInFlight = true;
+    setEditorDriveStatus('saving');
+    try {
+        const key = draftFileNameFor(editorItem);
+        const payload = JSON.stringify({ editingIdx, editorItem, savedAt: new Date().toISOString(), by: currentEditorName() });
+        const chunks = sdbChunks(payload);
+        if (chunks.length > 12) throw new Error('draft too large');
+        const rowArr = [key, currentEditorName(), editorItem.sku_no || editorItem.description || '(new item)', new Date().toISOString()].concat(chunks);
+        const keys = await sdbDraftKeys();
+        const hit = keys.find(k => k.key === key);
+        if (hit) await gdriveFetch(`${SDB_API}/values/${sdbEnc(SDB_DRAFT_TAB + '!A' + hit.row)}?valueInputOption=RAW`, 'PUT', { values: [rowArr] });
+        else await gdriveFetch(`${SDB_API}/values/${sdbEnc(SDB_DRAFT_TAB + '!A1')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, 'POST', { values: [rowArr] });
+        draftDriveFileId = key;
+        draftDirtySinceLastDriveSync = false;
+        setEditorDriveStatus('synced', new Date());
+    } catch (err) {
+        console.error('Draft sheet sync failed:', err);
+        setEditorDriveStatus('error', err.message);
+    } finally {
+        draftSyncInFlight = false;
+    }
+}
+async function clearDraftFromDrive() {
+    if (!draftDriveFileId) return;
+    const key = draftDriveFileId;
+    draftDriveFileId = null;
+    try { await sdbDeleteDraftByKey(key); } catch (e) {}
+}
+async function deleteDriveDraftsByName(name) { try { await sdbDeleteDraftByKey(name); } catch (e) {} }
+async function listDriveDraftsForCurrentUser() {
+    if (!driveSessionIsLive()) return [];
+    await sdbDraftsEnsure();
+    const r = await gdriveFetch(`${SDB_API}/values/${sdbEnc(SDB_DRAFT_TAB + '!A2:P')}`);
+    const who = currentEditorName().replace(/[^a-zA-Z0-9_-]/g, '_');
+    const out = [];
+    (r.values || []).forEach(row => {
+        const key = sdbStr(row[0]);
+        if (!key.startsWith('Draft-' + who + '-')) return;
+        try {
+            const data = JSON.parse(row.slice(4).map(sdbStr).join(''));
+            if (!data) return;
+            data._driveFileId = key;
+            if (!data.savedAt) data.savedAt = sdbStr(row[3]);
+            out.push(data);
+        } catch (e) {}
+    });
+    return out.sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+}
+async function findMostRecentDriveDraftForCurrentUser() { const all = await listDriveDraftsForCurrentUser(); return all[0] || null; }
+
+
+// ============================================================
+// LIVE SAVE — every change in the editor goes to the item's row in the Items tab (~2 s after you stop typing).
+// The row is marked "In progress – by <name>" until Submit, which re-reads the row and verifies every detail.
+// ============================================================
+let editorLiveId = null;        // id of the sheet row this editor session is writing to
+let editorLiveNew = false;      // true when that row was created by this session (new entry)
+let sdbLiveTimer = null, sdbLiveBusy = false, sdbLivePending = false, sdbLiveWarned = '', sdbLiveLast = 0;
+let sdbClearStatusIds = new Set();
+
+function sdbLiveStatus(kind, extra) {
+    let el = document.getElementById('sdb-live-status');
+    if (!el) {
+        const anchor = document.getElementById('editor-save-status-drive');
+        if (!anchor || !anchor.parentElement) return;
+        el = document.createElement('div'); el.id = 'sdb-live-status'; el.style.cssText = 'font-size:10px;font-weight:700';
+        anchor.parentElement.appendChild(el);
+    }
+    const t = new Date().toLocaleTimeString();
+    const map = {
+        saving: ['📊 Saving to Sheet…', '#facc15'], ok: ['📊 Saved to Sheet ' + t, '#4ade80'],
+        err: ['❌ Sheet save failed' + (extra ? ' (' + extra + ')' : '') + ' — retrying on next change', '#f87171'],
+        warn: ['⚠️ ' + (extra || ''), '#fbbf24']
+    };
+    const m = map[kind] || ['', '#9ca3af'];
+    el.textContent = m[0]; el.style.color = m[1];
+}
+async function sdbSheetState() {
+    const hr = await gdriveFetch(`${SDB_API}/values/${sdbEnc('Items!1:1')}`);
+    const headers = ((hr.values || [[]])[0] || []).map(String);
+    const norm = headers.map(sdbNorm);
+    const idCol = norm.indexOf('id'), skuCol = norm.indexOf('sku');
+    if (idCol < 0 || skuCol < 0) throw new Error('The Items tab needs "ID" and "SKU" columns');
+    const iL = sdbColLetter(idCol), sL = sdbColLetter(skuCol);
+    const bg = await gdriveFetch(`${SDB_API}/values:batchGet?ranges=${sdbEnc(`Items!${iL}2:${iL}`)}&ranges=${sdbEnc(`Items!${sL}2:${sL}`)}`);
+    const cell = (arr, i) => sdbStr(arr && arr[i] && arr[i][0]).trim();
+    const ids = bg.valueRanges[0].values || [], skus = bg.valueRanges[1].values || [];
+    const n = Math.max(ids.length, skus.length);
+    const rows = [];
+    for (let i = 0; i < n; i++) rows.push({ row: i + 2, id: cell(ids, i), sku: cell(skus, i) });
+    return { headers, rows };
+}
+async function sdbEnsureLiveHeaders(headers, needChunks) {
+    let changed = false;
+    if (!headers.map(sdbNorm).includes('status')) { headers.push('Status'); changed = true; }
+    const have = sdbDataColIndexes(headers).length;
+    for (let n = have + 1; n <= needChunks; n++) { headers.push('Data ' + n); changed = true; }
+    if (changed) {
+        const meta = await sdbMeta();
+        await sdbEnsureGrid(meta, 'Items', 1, headers.length);
+        await gdriveFetch(`${SDB_API}/values/${sdbEnc('Items!A1')}?valueInputOption=RAW`, 'PUT', { values: [headers] });
+    }
+    return headers;
+}
+function sdbStatusKey(headers) { return headers[headers.map(sdbNorm).indexOf('status')] || 'Status'; }
+async function sdbWriteRow(item, row, status, state) {
+    // returns the row number written (new rows are appended)
+    let st = state || await sdbSheetState();
+    let headers = await sdbEnsureLiveHeaders(st.headers, sdbChunks(JSON.stringify(item)).length);
+    const key = sdbStatusKey(headers), id = String(item.id);
+    const extras = Object.assign({}, sdbExtras.get(id) || {}); extras[key] = status;
+    const rowArr = sdbItemRow(item, headers, extras);
+    sdbExtras.set(id, extras);
+    if (status) sdbStatus.set(id, status); else sdbStatus.delete(id);
+    if (row) {
+        await gdriveFetch(`${SDB_API}/values/${sdbEnc('Items!A' + row)}?valueInputOption=RAW`, 'PUT', { values: [rowArr] });
+        return row;
+    }
+    const r = await gdriveFetch(`${SDB_API}/values/${sdbEnc('Items!A1')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, 'POST', { values: [rowArr] });
+    const m = /!(?:[A-Z]+)(\d+)/.exec((r && r.updates && r.updates.updatedRange) || '');
+    return m ? parseInt(m[1], 10) : null;
+}
+function sdbLiveSchedule() {
+    if (!isFullAccess()) return;
+    if (!editorItem || !(editorItem.sku_no || '').trim()) return;
+    clearTimeout(sdbLiveTimer);
+    // ~2 s after you stop typing, but never more often than every 5 s (Google limits requests per minute)
+    const wait = Math.max(2000, sdbLiveLast + 5000 - Date.now());
+    sdbLiveTimer = setTimeout(() => { sdbLiveSaveNow(); }, wait);
+}
+async function sdbLiveSaveNow() {
+    if (!isFullAccess() || !driveSessionIsLive()) return;
+    if (!editorItem || !(editorItem.sku_no || '').trim()) return;
+    if (typeof editorHasChanges === 'function' && !editorHasChanges()) return;     // nothing to write yet
+    if (sdbLiveBusy) { sdbLivePending = true; return; }
+    sdbLiveBusy = true;
+    try {
+        sdbLiveStatus('saving');
+        const item = JSON.parse(JSON.stringify(editorItem));
+        if (sdbHasEmbedded(item)) { sdbLiveStatus('warn', 'A photo is still uploading — it will save to the sheet once it finishes'); return; }
+        const st = await sdbSheetState();
+        const me = currentEditorName();
+        const sku = item.sku_no.trim().toLowerCase();
+        let row = null;
+        if (editorLiveId) { const f = st.rows.find(r => r.id === String(editorLiveId)); if (f) row = f.row; }
+        const clash = st.rows.find(r => r.sku.toLowerCase() === sku && r.row !== row);
+        if (clash) {
+            // is the clashing row my own earlier "In progress" row (e.g. after reloading a draft)?
+            const sk = sdbStatusKey(st.headers);
+            const sc = st.headers.map(sdbNorm).indexOf('status');
+            let mine = false;
+            if (sc >= 0) {
+                const c = await gdriveFetch(`${SDB_API}/values/${sdbEnc('Items!' + sdbColLetter(sc) + clash.row)}`);
+                mine = sdbStr(c && c.values && c.values[0] && c.values[0][0]).includes(me);
+            }
+            if (mine && !editorLiveId) { editorLiveId = clash.id; editorLiveNew = true; row = clash.row; }
+            else {
+                if (sdbLiveWarned !== sku) { sdbLiveWarned = sku; showToast('⚠️', `SKU "${item.sku_no}" already exists in the sheet (row ${clash.row}). Live saving is paused for this item; your draft is still saved.`, null, null, 15000); }
+                sdbLiveStatus('warn', 'SKU already exists in the sheet — live save paused');
+                return;
+            }
+        }
+        if (!row) {
+            // brand-new row: keep my id if it is free, otherwise the next free one
+            const used = new Set(st.rows.map(r => r.id));
+            let id = editorLiveId && !used.has(String(editorLiveId)) ? String(editorLiveId) : nextFreeItemId(st.rows.map(r => ({ id: r.id })));
+            item.id = id; editorItem.id = id; editorLiveId = id; editorLiveNew = (editingIdx === null);
+        }
+        item.id = String(editorLiveId);
+        await sdbWriteRow(item, row, `In progress – by ${me}`, st);
+        sdbLiveStatus('ok');
+        sdbLiveLast = Date.now();
+    } catch (e) {
+        console.error('Live sheet save failed:', e);
+        sdbLiveStatus('err', e.message);
+    } finally {
+        sdbLiveBusy = false;
+        if (sdbLivePending) { sdbLivePending = false; sdbLiveSchedule(); }
+    }
+}
+// Leaving the editor without submitting: new item -> delete its unfinished row; existing item -> put the original back.
+async function sdbAbandonLive() {
+    clearTimeout(sdbLiveTimer);
+    while (sdbLiveBusy) await _sleep(150);
+    const id = editorLiveId, wasNew = editorLiveNew, snap = editorSnapshot;
+    editorLiveId = null; editorLiveNew = false;
+    if (!id || !driveSessionIsLive()) return;
+    try {
+        const st = await sdbSheetState();
+        const f = st.rows.find(r => r.id === String(id));
+        if (!f) return;
+        if (wasNew) {
+            const meta = await sdbMeta();
+            const sid = meta.sheets.find(s => s.properties.title === 'Items').properties.sheetId;
+            await gdriveFetch(`${SDB_API}:batchUpdate`, 'POST', { requests: [{ deleteDimension: { range: { sheetId: sid, dimension: 'ROWS', startIndex: f.row - 1, endIndex: f.row } } }] });
+            sdbStatus.delete(String(id)); sdbExtras.delete(String(id));
+        } else if (snap) {
+            const orig = JSON.parse(snap); orig.id = String(id);
+            await sdbWriteRow(orig, f.row, '');
+        }
+    } catch (e) { console.warn('Abandon cleanup failed:', e.message); showToast('⚠️', 'Could not clean up the unfinished sheet row: ' + e.message); }
+}
+function sdbDecorateInProgress() {
+    document.querySelectorAll('#consolidated-grid tr[data-idx]').forEach(tr => {
+        const it = currentData.main_items[parseInt(tr.getAttribute('data-idx'), 10)];
+        const old = tr.querySelector('.sdb-prog'); if (old) old.remove();
+        const st = it && sdbStatus.get(String(it.id));
+        if (!st || !tr.children[2]) return;
+        const b = document.createElement('div'); b.className = 'sdb-prog';
+        b.style.cssText = 'display:inline-block;margin-top:3px;font-size:8px;font-weight:900;background:#78350f;color:#fde68a;border-radius:6px;padding:1px 6px;white-space:nowrap';
+        b.textContent = '⏳ ' + st.replace('In progress – ', 'In progress · ');
+        tr.children[2].appendChild(b);
+    });
+}
+(function installLive() {
+    const sds = window.scheduleDraftSave;
+    window.scheduleDraftSave = function () { const r = sds.apply(this, arguments); sdbLiveSchedule(); return r; };
+    const ief = window.initEditorForm;
+    window.initEditorForm = function (existing, idx) {
+        clearTimeout(sdbLiveTimer);
+        const r = ief.apply(this, arguments);
+        editorLiveId = (existing && idx !== null && idx !== undefined && existing.id) ? String(existing.id) : null;
+        editorLiveNew = false; sdbLiveWarned = '';
+        return r;
+    };
+    window.clearEditorForm = async function () {
+        if (!confirm('Clear all form data?')) return;
+        const sku = editorItem && editorItem.sku_no;
+        await sdbAbandonLive();
+        try { await clearEditorDraft(sku); } catch (e) {}
+        editingIdx = null;
+        editorItem = createBlankItem((currentData.main_items.length + 1).toString());
+        editorSnapshot = JSON.stringify(editorItem);
+        renderEditorForm();
+    };
+    const bcv = window.buildConsolidatedView;
+    window.buildConsolidatedView = function () { const r = bcv.apply(this, arguments); sdbDecorateInProgress(); return r; };
+})();
+
+
+// ============================================================
+// MASS UPLOAD — drop many photos named by the standard codes; each lands in its slot.
+//   <SKU>-MI · -PC (Qty 2 - Item 1, Qty 1 - Item 2) · -P-FRONT/REAR/LEFT/RIGHT/TOP/BOT
+//   -OB-ISO/FRONT/TOP/SIDE · -GB-FRONT/REAR/LEFT/RIGHT/TOP/BOT · -CTQ1, CTQ2…
+//   <SKU>-Item description - L25.5, W4, H24   (BOM part: photo + measurements, cm / kg)
+// ============================================================
+const MU_FIXED = {
+    'MI': ['product_photo', 'Marketing Image'], 'PC': ['pkg_content_photo', 'Package Content'],
+    'P-FRONT': ['front_photo', 'Front View'], 'P-REAR': ['rear_photo', 'Rear View'], 'P-LEFT': ['left_photo', 'Left View'],
+    'P-RIGHT': ['right_photo', 'Right View'], 'P-TOP': ['top_photo', 'Top View'], 'P-BOT': ['bottom_photo', 'Bottom View'], 'P-BOTTOM': ['bottom_photo', 'Bottom View'],
+    'OB-ISO': ['mc_iso_photo', 'Master Carton · Isometric'], 'OB-FRONT': ['mc_front_photo', 'Master Carton · Front'],
+    'OB-TOP': ['mc_top_photo', 'Master Carton · Top'], 'OB-SIDE': ['mc_left_right_photo', 'Master Carton · Side'],
+    'P-SIDE': ['mc_left_right_photo', 'Master Carton · Side'],
+    'GB-FRONT': ['gb_front_photo', 'Gift Box · Front'], 'GB-REAR': ['gb_rear_photo', 'Gift Box · Rear'], 'GB-LEFT': ['gb_left_photo', 'Gift Box · Left'],
+    'GB-RIGHT': ['gb_right_photo', 'Gift Box · Right'], 'GB-TOP': ['gb_top_photo', 'Gift Box · Top'], 'GB-BOT': ['gb_bottom_photo', 'Gift Box · Bottom'], 'GB-BOTTOM': ['gb_bottom_photo', 'Gift Box · Bottom']
+};
+const MU_MEAS_RE = '(?:WT|EA|KG|[LWHTVDCA])\\s*[:=]?\\s*\\d+(?:\\.\\d+)?';
+function muParseMeasures(str) {
+    const out = {}, re = /(WT|EA|KG|[LWHTVDCA])\s*[:=]?\s*(\d+(?:\.\d+)?)/gi; let m;
+    while ((m = re.exec(str))) out[m[1].toUpperCase()] = m[2];
+    return out;
+}
+function muParsePackageContents(txt) {
+    const out = [];
+    String(txt || '').replace(/[()\[\]]/g, '').split(/[,;]/).forEach(part => {
+        const m = /Qty\s*#?\s*(\d+)\s*[-–:]\s*(.+)/i.exec(part.trim());
+        if (m) out.push({ qty: m[1], name: m[2].trim() });
+    });
+    return out;
+}
+function muClassify(fileName, sku) {
+    let name = fileName.replace(/\.[a-z0-9]+$/i, '').replace(/\s*\(\d+\)$/, '').trim();
+    let rest = name, otherSku = null;
+    const s = (sku || '').trim();
+    if (s && name.toLowerCase().startsWith(s.toLowerCase())) rest = name.slice(s.length).replace(/^[\s_\-–]+/, '');
+    const tryRest = (r) => {
+        const up = r.toUpperCase().replace(/\s+/g, '');
+        if (MU_FIXED[up]) return { kind: 'photo', key: MU_FIXED[up][0], label: MU_FIXED[up][1] };
+        const pc = /^PC\b[\s_\-–]*(.*)$/i.exec(r);
+        if (pc) return { kind: 'photo', key: 'pkg_content_photo', label: 'Package Content', contents: muParsePackageContents(pc[1]) };
+        const q = /^CTQ\s*[-_]?\s*(\d+)$/i.exec(r);
+        if (q && +q[1] >= 1) return { kind: 'ctq', idx: +q[1] - 1, key: 'ctq_photo_' + (+q[1] - 1), label: 'CTQ ' + q[1] };
+        const bom = new RegExp('^(.*?)\\s*[-–]\\s*((?:' + MU_MEAS_RE + '\\s*[,xX×\\s]*)+)$', 'i').exec(r);
+        if (bom && bom[1].trim()) return { kind: 'bom', desc: bom[1].trim(), meas: muParseMeasures(bom[2]), label: 'BOM · ' + bom[1].trim() };
+        return null;
+    };
+    let hit = tryRest(rest);
+    if (!hit && rest === name) {           // no SKU prefix matched: look for a known code at the end of the name
+        const m = /^(.*?)[\s_\-–]+((?:MI|PC.*|(?:P|OB|GB)-[A-Z]+|CTQ\s*\d+))$/i.exec(name);
+        if (m) { hit = tryRest(m[2]); if (hit && m[1].trim()) otherSku = m[1].trim(); }
+    }
+    if (hit && otherSku && s && otherSku.toLowerCase() !== s.toLowerCase()) return { error: 'belongs to "' + otherSku + '", not ' + s };
+    return hit || { error: 'name not recognized' };
+}
+function muTargetHasValue(c) {
+    if (c.kind === 'photo' || c.kind === 'ctq') return !!editorItem[c.key];
+    if (c.kind === 'bom') { const d = c.desc.toLowerCase().replace(/\s+/g, ' '); return (editorItem.components || []).some(x => (x.description || '').toLowerCase().replace(/\s+/g, ' ').trim() === d && x.component_photo); }
+    return false;
+}
+let muFiles = [];
+function openMassUpload() {
+    if (!isFullAccess()) return;
+    if (!driveSessionIsLive()) { showToastAction('🔒', 'Connect to Google Drive before uploading photos.', 'Reconnect', () => connectGDrive('reconnect')); return; }
+    if (!(editorItem.sku_no || '').trim()) { showToast('⚠️', 'Enter the SKU No first. File names are matched against it.'); return; }
+    muFiles = [];
+    let el = document.getElementById('mu-modal');
+    if (!el) {
+        el = document.createElement('div'); el.id = 'mu-modal';
+        el.style.cssText = 'position:fixed;inset:0;z-index:99996;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:20px;font-family:Arial,sans-serif';
+        document.body.appendChild(el);
+    }
+    el.style.display = 'flex';
+    muRender();
+}
+let muBusy = false, muMini = false, muProg = '';
+function muClose() { if (muBusy) return; const el = document.getElementById('mu-modal'); if (el) el.style.display = 'none'; const p = document.getElementById('mu-pill'); if (p) p.remove(); muMini = false; muFiles = []; }
+(function () { const st = document.createElement('style'); st.textContent = '@keyframes muspin{to{transform:rotate(360deg)}}.mu-spin{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:muspin .8s linear infinite;vertical-align:-2px;margin-right:6px}'; document.head.appendChild(st); })();
+function muMinimize() {
+    const el = document.getElementById('mu-modal'); if (el) el.style.display = 'none';
+    muMini = true; muPill();
+}
+function muRestore() { muMini = false; const p = document.getElementById('mu-pill'); if (p) p.remove(); const el = document.getElementById('mu-modal'); if (el) { el.style.display = 'flex'; muRender(muProg); } }
+function muPill() {
+    let p = document.getElementById('mu-pill');
+    if (!p) { p = document.createElement('div'); p.id = 'mu-pill'; p.onclick = muRestore; p.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:99997;background:#111827;border:1px solid #44D62C;color:#e5e7eb;border-radius:999px;padding:9px 16px;font:700 12px Arial,sans-serif;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.5)'; document.body.appendChild(p); }
+    p.innerHTML = `<span class="mu-spin" style="color:#44D62C"></span>${escHtmlS(muProg || 'Uploading…')} <span style="color:#9ca3af;font-weight:400">· click to open</span>`;
+}
+function muAddFiles(list) {
+    if (muBusy) return;
+    const sku = editorItem.sku_no;
+    [...list].forEach(f => { if (!/^image\//.test(f.type) && !/\.(png|jpe?g|webp|gif)$/i.test(f.name)) return; muFiles.push({ file: f, cls: muClassify(f.name, sku) }); });
+    // two files for the same slot: keep the first, flag the rest
+    const seen = new Set();
+    muFiles.forEach(x => {
+        x.dup = false;
+        if (x.cls.error) return;
+        const k = x.cls.kind === 'bom' ? 'bom:' + x.cls.desc.toLowerCase() : x.cls.key;
+        if (seen.has(k)) x.dup = true; else seen.add(k);
+    });
+    muRender();
+}
+function muRender(progress) {
+    const el = document.getElementById('mu-modal'); if (!el) return;
+    const ok = muFiles.filter(x => !x.cls.error && !x.dup);
+    const rows = muFiles.map((x, i) => {
+        let status;
+        if (x.cls.error) status = `<span style="color:#f87171">✖ ${escHtmlS(x.cls.error)}</span>`;
+        else if (x.dup) status = '<span style="color:#fbbf24">⚠ duplicate slot — skipped</span>';
+        else {
+            const meas = x.cls.kind === 'bom' ? ' — ' + Object.entries(x.cls.meas).map(([k, v]) => k + v).join(', ') : '';
+            const pcs = x.cls.contents && x.cls.contents.length ? ` — ${x.cls.contents.length} package item(s)` : '';
+            status = `<span style="color:#34d399">✔ ${escHtmlS(x.cls.label)}${escHtmlS(meas)}${pcs}</span>` + (muTargetHasValue(x.cls) ? ' <span style="color:#fbbf24">(replaces existing photo)</span>' : '');
+        }
+        return `<tr style="border-top:1px solid #1f2937"><td style="padding:5px 8px;color:#d1d5db;word-break:break-all">${escHtmlS(x.file.name)}</td><td style="padding:5px 8px">${status}</td><td style="padding:5px 4px"><button onclick="muRemove(${i})" style="color:#6b7280;cursor:pointer;background:none;border:0">✕</button></td></tr>`;
+    }).join('');
+    el.innerHTML = `
+    <div style="background:#111827;border:1px solid #374151;border-radius:14px;width:100%;max-width:820px;max-height:90vh;overflow:auto;padding:20px;color:#e5e7eb">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <div style="font-weight:900;font-size:15px">📤 Mass Upload — ${escHtmlS(editorItem.sku_no)}</div>
+            ${muBusy ? '<button onclick="muMinimize()" title="Minimize" style="color:#9ca3af;cursor:pointer;background:none;border:0;font-size:16px">—</button>' : '<button onclick="muClose()" style="color:#9ca3af;cursor:pointer;background:none;border:0;font-size:16px">✕</button>'}
+        </div>
+        <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">Name files <b>SKU-CODE</b>, e.g. <code>${escHtmlS(editorItem.sku_no)}-P-FRONT.jpg</code>. Photos upload to Drive and fill the matching slot; BOM names also fill the measurements.</div>
+        ${(() => {
+            const S = escHtmlS(editorItem.sku_no);
+            const th = 'text-align:left;padding:4px 8px;color:#9ca3af;font-weight:700';
+            const td = 'padding:4px 8px;border-top:1px solid #1f2937;vertical-align:top';
+            const code = c => `<code style="color:#44D62C">${c}</code>`;
+            const row = (sec, codes, ex) => `<tr><td style="${td};color:#e5e7eb;white-space:nowrap">${sec}</td><td style="${td}">${codes}</td><td style="${td};color:#9ca3af">${ex}</td></tr>`;
+            return `<div style="border:1px solid #374151;border-radius:10px;margin-bottom:12px;overflow:hidden">
+              <div style="background:#1f2937;padding:6px 10px;font-size:11px;font-weight:900;color:#e5e7eb">📋 Naming guide — file name = <span style="color:#44D62C">${S}</span> + dash + code (case doesn't matter)</div>
+              <table style="width:100%;font-size:10.5px;border-collapse:collapse">
+                <tr><th style="${th}">Section</th><th style="${th}">Code</th><th style="${th}">Example file name</th></tr>
+                ${row('1 · Marketing Image', code('MI'), `${S}-MI.jpg`)}
+                ${row('2 · Package Contents', code('PC (Qty 2 - Item A, Qty 1 - Item B)'), `${S}-PC (Qty 2 - Ratchet Handle, Qty 1 - Bag).jpg`)}
+                ${row('3 · Product views', [code('P-FRONT'), code('P-REAR'), code('P-LEFT'), code('P-RIGHT'), code('P-TOP'), code('P-BOT')].join(' · '), `${S}-P-FRONT.jpg`)}
+                ${row('4 · Master carton (Outer Box)', [code('OB-ISO'), code('OB-FRONT'), code('OB-TOP'), code('OB-SIDE')].join(' · ') + ' <span style="color:#6b7280">(P-SIDE also = carton side)</span>', `${S}-OB-ISO.jpg`)}
+                ${row('5 · Gift box', [code('GB-FRONT'), code('GB-REAR'), code('GB-LEFT'), code('GB-RIGHT'), code('GB-TOP'), code('GB-BOT')].join(' · '), `${S}-GB-FRONT.jpg`)}
+                ${row('6 · BOM component + measurements', code('Item description - L25.5, W4, H24'), `${S}-Ratchet Handle - L25.5, W4, H24.jpg`)}
+                ${row('7 · CTQ', code('CTQ1') + ' · ' + code('CTQ2') + ' · …', `${S}-CTQ1.jpg`)}
+              </table>
+              <div style="padding:6px 10px;font-size:10px;color:#9ca3af;border-top:1px solid #1f2937">BOM letters: <b>L</b> length · <b>W</b> width · <b>H</b> height · <b>T</b> thickness · <b>V</b> volume · <b>WT</b>/<b>KG</b> weight · <b>D</b> diameter · <b>C</b> circumference · <b>EA</b>/<b>A</b> elevation/angle. Same item name again = updates that component. Each file shows ✔ or ✖ below before you upload.</div>
+            </div>`;
+        })()}
+        <div id="mu-drop" ondragover="event.preventDefault();this.style.borderColor='#44D62C'" ondragleave="this.style.borderColor='#374151'" ondrop="event.preventDefault();this.style.borderColor='#374151';muAddFiles(event.dataTransfer.files)"
+             onclick="document.getElementById('mu-input').click()" style="border:2px dashed #374151;border-radius:12px;padding:22px;text-align:center;cursor:pointer;color:#9ca3af;font-size:12px">
+            Drop photos here or click to choose<input id="mu-input" type="file" accept="image/*" multiple style="display:none" onchange="muAddFiles(this.files);this.value=''">
+        </div>
+        ${muFiles.length ? `<table style="width:100%;font-size:11px;margin-top:12px;border-collapse:collapse">${rows}</table>` : ''}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+            <div id="mu-progress" style="font-size:11px;color:${muBusy ? '#44D62C' : '#9ca3af'}">${muBusy ? '<span class="mu-spin"></span>' : ''}${progress || (muFiles.length ? ok.length + ' of ' + muFiles.length + ' file(s) ready' : '')}</div>
+            <div style="display:flex;gap:8px">
+                ${muBusy
+                  ? `<button onclick="muMinimize()" style="border:1px solid #374151;color:#e5e7eb;border-radius:8px;padding:7px 14px;cursor:pointer;background:none;font-size:12px">Minimize</button>
+                     <button id="mu-go" disabled style="background:#44D62C;color:#000;font-weight:900;border-radius:8px;padding:7px 16px;border:0;font-size:12px;opacity:.6;cursor:not-allowed"><span class="mu-spin"></span>Uploading…</button>`
+                  : `<button onclick="muClose()" style="border:1px solid #374151;color:#9ca3af;border-radius:8px;padding:7px 14px;cursor:pointer;background:none;font-size:12px">Cancel</button>
+                     <button id="mu-go" ${ok.length ? '' : 'disabled'} onclick="muRun()" style="background:#44D62C;color:#000;font-weight:900;border-radius:8px;padding:7px 16px;cursor:pointer;border:0;font-size:12px;${ok.length ? '' : 'opacity:.4;cursor:not-allowed'}">Upload ${ok.length || ''} photo(s)</button>`}
+            </div>
+        </div>
+    </div>`;
+}
+function muRemove(i) { if (muBusy) return; muFiles.splice(i, 1); muAddFiles([]); }
+function muBlankComponent() { return JSON.parse(JSON.stringify(createBlankItem('x').components[0])); }
+function muApplyBom(c, url) {
+    const d = c.desc.toLowerCase().replace(/\s+/g, ' ');
+    if (!editorItem.components) editorItem.components = [];
+    let comp = editorItem.components.find(x => (x.description || '').toLowerCase().replace(/\s+/g, ' ').trim() === d);
+    let created = false;
+    if (!comp) {
+        const blank = editorItem.components.find(x => !(x.description || '').trim() && !x.component_photo && !x.dim_l_cm && !x.material);
+        if (blank) comp = blank; else { comp = muBlankComponent(); comp.id = String(editorItem.components.length + 1); editorItem.components.push(comp); }
+        comp.description = c.desc; created = true;
+    }
+    const m = c.meas, cm2in = (v) => { const n = parseFloat(v); return isNaN(n) ? '' : (n / 2.54).toFixed(2); };
+    if (m.L) { comp.dim_l_cm = m.L; comp.dim_l_in = cm2in(m.L); }
+    if (m.W) { comp.dim_w_cm = m.W; comp.dim_w_in = cm2in(m.W); }
+    if (m.H) { comp.dim_h_cm = m.H; comp.dim_h_in = cm2in(m.H); }
+    if (m.T) { comp.thickness_cm = m.T; comp.thickness_in = cm2in(m.T); comp.show_thickness = true; }
+    if (m.V) { comp.volume_oz_l = m.V; comp.show_volume = true; }
+    const wt = m.WT || m.KG; if (wt) { comp.weight_kg = wt; comp.show_weight = true; }
+    const dia = m.D || m.C; if (dia) { comp.circumference_cm = dia; comp.circumference_in = cm2in(dia); comp.show_circumference = true; }
+    const ea = m.EA || m.A; if (ea) { comp.elevation_angle = ea; comp.show_elevation_angle = true; }
+    if (created) { comp.show_length = !!m.L; comp.show_width = !!m.W; comp.show_height = !!m.H; comp.show_weight = !!wt; }
+    else { if (m.L) comp.show_length = true; if (m.W) comp.show_width = true; if (m.H) comp.show_height = true; }
+    if (url) comp.component_photo = url;
+}
+async function muRun() {
+    const todo = muFiles.filter(x => !x.cls.error && !x.dup);
+    if (!todo.length) return;
+    if (!driveSessionIsLive()) { showReconnectOverlay(); return; }
+    if (muBusy) return;
+    muBusy = true;
+    const sku = editorItem.sku_no.trim();
+    let done = 0, failed = [];
+    try {
+    for (const x of todo) {
+        muProg = `Uploading ${done + 1} of ${todo.length}: ${x.file.name}…`;
+        if (muMini) muPill(); else muRender(muProg);
+        const c = x.cls;
+        let oldUrl = null;
+        if (c.kind === 'photo' || c.kind === 'ctq') oldUrl = editorItem[c.key] || null;
+        else if (c.kind === 'bom') { const d = c.desc.toLowerCase().replace(/\s+/g, ' '); const ex = (editorItem.components || []).find(y => (y.description || '').toLowerCase().replace(/\s+/g, ' ').trim() === d); oldUrl = ex && ex.component_photo || null; }
+        let url = null;
+        try { url = await uploadPhotoToDriveForSku(x.file, `${sku}-${(c.key || 'bom')}-${Date.now()}.png`, sku, oldUrl); } catch (e) { url = null; }
+        if (!url || String(url).startsWith('data:')) { failed.push(x.file.name); continue; }
+        if (c.kind === 'photo') {
+            editorItem[c.key] = url;
+            if (c.contents && c.contents.length) editorItem.package_contents = c.contents;
+            if (/^mc_/.test(c.key)) editorItem.show_master_carton = true;
+            if (/^gb_/.test(c.key)) editorItem.show_gift_box = true;
+        } else if (c.kind === 'ctq') {
+            if (!editorItem.ctq) editorItem.ctq = [];
+            while (editorItem.ctq.length <= c.idx) editorItem.ctq.push({ id: String(editorItem.ctq.length + 1), factor: '', description: '', criteria: '', photo: '' });
+            editorItem[c.key] = url; editorItem.show_ctq = true;
+        } else if (c.kind === 'bom') muApplyBom(c, url);
+        done++;
+    }
+    } finally { muBusy = false; muProg = ''; }
+    renderEditorForm();
+    scheduleDraftSave();
+    muClose();
+    showToast(failed.length ? '⚠️' : '✅', `${done} photo(s) added${failed.length ? '; failed: ' + failed.join(', ') : ''}. Review, then Submit.`, null, null, failed.length ? 20000 : 8000);
+}
+
+
+// ============================================================
+// ACCESS LEVELS — everyone outside this list is view-only (Consolidated list + report preview only)
+// NOTE: this hides/blocks the controls in the app. Real protection = share the Google Sheet with
+// everyone else as "Viewer" (see Share button in the sheet).
+// ============================================================
+const FULL_ACCESS_EMAILS = ['kevin.mariano@rhinousainc.com', 'aivan.tioco@rhinousainc.com', 'bradley.gnesin@rhinousainc.com'];
+function isFullAccess() {
+    return FULL_ACCESS_EMAILS.includes(String((currentUser && currentUser.email) || '').trim().toLowerCase());
+}
+(function injectViewerCss() {
+    const st = document.createElement('style');
+    st.textContent = `
+    body.viewer-mode #tab-sheet1, body.viewer-mode #tab-edit-group, body.viewer-mode #tab-revision,
+    body.viewer-mode [onclick^="handleBackupClick"], body.viewer-mode [onclick^="handleRestoreClick"],
+    body.viewer-mode [onclick^="handleVersionHistoryClick"], body.viewer-mode [onclick^="reportStuckBase64Photos"],
+    body.viewer-mode #consolidated-view [onclick^="duplicateSelected"], body.viewer-mode #consolidated-view [onclick^="syncToGoogleSheet"],
+    body.viewer-mode #consolidated-view [onclick^="switchSheet('sheet1')"],
+    body.viewer-mode [onclick^="clearDriveLink"], body.viewer-mode [onclick^="saveDriveLink"], body.viewer-mode [onclick^="findDriveLinkBySku"],
+    body.viewer-mode [id^="drive-link-input-"], body.viewer-mode .viewer-hide { display: none !important; }
+    body.viewer-mode #consolidated-table th:nth-child(1), body.viewer-mode #consolidated-table td:nth-child(1),
+    body.viewer-mode #consolidated-table th:nth-child(10), body.viewer-mode #consolidated-table td:nth-child(10),
+    body.viewer-mode #consolidated-table col:nth-child(1), body.viewer-mode #consolidated-table col:nth-child(10) { display: none !important; }`;
+    document.head.appendChild(st);
+})();
+function applyAccessMode() {
+    const viewer = !isFullAccess();
+    document.body.classList.toggle('viewer-mode', viewer);
+    const lab = document.getElementById('tab-sheet1');
+    if (lab && lab.parentElement) lab.parentElement.classList.toggle('viewer-hide', viewer);   // the "Editor" group in the sidebar
+    return viewer;
+}
+// hard guards (in case a hidden control is triggered some other way)
+['editItem', 'deleteItem', 'duplicateSelected', 'saveDriveLink', 'clearDriveLink', 'findDriveLinkBySku', 'handleBackupClick', 'handleRestoreClick',
+ 'handleVersionHistoryClick', 'reportStuckBase64Photos', 'syncToGoogleSheet', 'submitToConsolidated'].forEach(n => {
+    const f = window[n];
+    if (typeof f !== 'function') return;
+    window[n] = function (...a) { if (!isFullAccess()) { showToast('🔒', 'View-only access: you can preview reports only.'); return; } return f.apply(this, a); };
+});
+(function () {
+    const sw = window.switchSheet;
+    window.switchSheet = function (key) {
+        if (!isFullAccess() && ['sheet1', 'edit', 'revision'].includes(key)) key = 'consolidated';
+        return sw.call(this, key);
+    };
+    const pli = window.postLoginInit;
+    window.postLoginInit = async function () {
+        applyAccessMode();
+        const r = await pli.apply(this, arguments);
+        if (applyAccessMode()) { try { window.switchSheet('consolidated'); buildConsolidatedView(); } catch (e) {} }
+        return r;
+    };
+    const pb = window.presenceBeat;                       // viewers never write presence markers
+    window.presenceBeat = function () { if (!isFullAccess()) return Promise.resolve(); return pb.apply(this, arguments); };
+    const std = window.saveToDrive;                       // viewers never write to the Sheet
+    window.saveToDrive = function () { if (!isFullAccess()) return Promise.resolve(true); return std.apply(this, arguments); };
+})();
+
+
 </script>
 </body>
 </html>
