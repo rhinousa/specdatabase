@@ -7118,7 +7118,24 @@ function applyAccessMode() {
     if (typeof f !== 'function') return;
     window[n] = function (...a) { if (!isFullAccess()) { showToast('🔒', 'View-only access: you can preview reports only.'); return; } return f.apply(this, a); };
 });
+// Deep link (#sku=...): the item list is loaded from the Sheet a moment AFTER sign-in, so keep the
+// requested SKU pending and open its preview as soon as the list that contains it has been built.
+let pendingDeepSku = (() => { const m = location.hash.match(/[#&]sku=([^&]+)/); try { return m ? decodeURIComponent(m[1]).trim() : null; } catch (e) { return null; } })();
+function tryDeepLink() {
+    if (!pendingDeepSku || !currentUser) return;
+    const want = pendingDeepSku.toLowerCase();
+    const i = (currentData.main_items || []).findIndex(m => String(m.sku_no || '').trim().toLowerCase() === want);
+    if (i < 0) return;
+    pendingDeepSku = null;
+    try { window.switchSheet('consolidated'); } catch (e) {}
+    openPdfReport(i);
+}
 (function () {
+    if (pendingDeepSku) setTimeout(() => {
+        if (pendingDeepSku && currentUser) { showToast('⚠️', 'No item found for SKU "' + pendingDeepSku + '".'); pendingDeepSku = null; }
+    }, 30000);
+    const bcv = window.buildConsolidatedView;
+    window.buildConsolidatedView = function () { const r = bcv.apply(this, arguments); try { tryDeepLink(); } catch (e) { console.error(e); } return r; };
     const sw = window.switchSheet;
     window.switchSheet = function (key) {
         if (!isFullAccess() && ['sheet1', 'edit', 'revision'].includes(key)) key = 'consolidated';
@@ -7130,14 +7147,7 @@ function applyAccessMode() {
         const r = await pli.apply(this, arguments);
         if (applyAccessMode()) { try { window.switchSheet('consolidated'); buildConsolidatedView(); } catch (e) {} }
         // deep link: ?preview=<SKU> opens that item's PDF preview straight after sign-in
-        try {
-            const hm = location.hash.match(/[#&]sku=([^&]+)/);
-            const sku = hm ? decodeURIComponent(hm[1]) : null;
-            if (sku) {
-                const i = (currentData.main_items || []).findIndex(m => String(m.sku_no || '').trim().toLowerCase() === sku.trim().toLowerCase());
-                if (i >= 0) openPdfReport(i); else showToast('⚠️', 'No item found for SKU "' + sku + '".');
-            }
-        } catch (e) { console.error(e); }
+        tryDeepLink();
         return r;
     };
     const pb = window.presenceBeat;                       // viewers never write presence markers
