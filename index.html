@@ -7138,7 +7138,21 @@ function tryDeepLink() {
         if (pendingDeepSku && currentUser) { showToast('⚠️', 'No item found for SKU "' + pendingDeepSku + '".'); pendingDeepSku = null; }
     }, 30000);
     const bcv = window.buildConsolidatedView;
-    window.buildConsolidatedView = function () { const r = bcv.apply(this, arguments); try { tryDeepLink(); } catch (e) { console.error(e); } return r; };
+    window.buildConsolidatedView = function () { try { applyAccessMode(); } catch (e) {} const r = bcv.apply(this, arguments); try { tryDeepLink(); } catch (e) { console.error(e); } return r; };
+    // The real sign-in path is onGoogleConnected() (postLoginInit is never called), so the access
+    // level has to be applied here — otherwise everyone sees the full editor UI.
+    const ogc = window.onGoogleConnected;
+    window.onGoogleConnected = async function () {
+        try { applyAccessMode(); } catch (e) {}
+        const r = await ogc.apply(this, arguments);
+        if (applyAccessMode()) { try { window.switchSheet('consolidated'); buildConsolidatedView(); } catch (e) {} }
+        try { tryDeepLink(); } catch (e) {}
+        return r;
+    };
+    ['triggerSheetAutoSync', 'pushDataToGoogleSheet', 'triggerAutoSave'].forEach(n => {   // viewers never write anywhere (silent)
+        const f = window[n]; if (typeof f !== 'function') return;
+        window[n] = function () { if (!isFullAccess()) return Promise.resolve(); return f.apply(this, arguments); };
+    });
     const sw = window.switchSheet;
     window.switchSheet = function (key) {
         if (!isFullAccess() && ['sheet1', 'edit', 'revision'].includes(key)) key = 'consolidated';
