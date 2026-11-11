@@ -210,8 +210,8 @@
             <span id="pdf-popup-title" class="text-xs text-gray-400 ml-3"></span>
         </div>
         <div class="flex gap-3">
-            <a id="pdf-popup-drive" href="#" target="_blank" style="display:none" class="viewer-hide bg-blue-900/40 hover:bg-blue-900/70 border border-blue-700/50 text-blue-300 text-xs font-bold px-4 py-2 rounded-lg no-underline cursor-pointer">🔗 Spec Sheet</a>
-            <button id="export-pdf-btn" onclick="exportToPDF(currentPdfIdx !== null ? currentData.main_items[currentPdfIdx] : editorItem)" class="bg-pantone text-black text-xs font-black px-4 py-2 rounded-lg cursor-pointer hover:opacity-90">📄 Export to PDF</button>
+            <a id="pdf-popup-drive" href="#" target="_blank" style="display:none" class="bg-pantone text-black text-xs font-black px-4 py-2 rounded-lg no-underline cursor-pointer hover:opacity-90">🔗 Spec Sheet</a>
+            <button id="export-pdf-btn" data-viewer="no" onclick="exportToPDF(currentPdfIdx !== null ? currentData.main_items[currentPdfIdx] : editorItem)" class="bg-blue-900/40 hover:bg-blue-900/70 border border-blue-700/50 text-blue-300 text-xs font-bold px-4 py-2 rounded-lg cursor-pointer">📄 Export to PDF</button>
             <button onclick="closePdfPopup()" class="bg-gray-800 text-gray-300 text-xs font-bold px-4 py-2 rounded-lg cursor-pointer hover:bg-gray-700">✕ Close</button>
         </div>
     </div>
@@ -7098,7 +7098,9 @@ function isFullAccess() {
     body.viewer-mode [id^="drive-link-input-"], body.viewer-mode .viewer-hide { display: none !important; }
     body.viewer-mode #consolidated-table th:nth-child(1), body.viewer-mode #consolidated-table td:nth-child(1),
     body.viewer-mode #consolidated-table th:nth-child(10), body.viewer-mode #consolidated-table td:nth-child(10),
-    body.viewer-mode #consolidated-table th:nth-child(11), body.viewer-mode #consolidated-table td:nth-child(11),
+    body.viewer-mode #export-pdf-btn { display: none !important; }
+    @media print { body.viewer-mode > * { display: none !important; } }
+    body.viewer-mode #consolidated-table th:nth-child(11),body.viewer-mode #consolidated-table td:nth-child(11),
     body.viewer-mode #consolidated-table col:nth-child(1), body.viewer-mode #consolidated-table col:nth-child(10), body.viewer-mode #consolidated-table col:nth-child(11) { display: none !important; }
     #consolidated-table tbody tr { cursor: pointer; }
     #consolidated-table tbody tr:hover { background: rgba(68,214,44,.12) !important; box-shadow: inset 3px 0 0 #44D62C; }`;
@@ -7113,7 +7115,7 @@ function applyAccessMode() {
 }
 // hard guards (in case a hidden control is triggered some other way)
 ['editItem', 'deleteItem', 'duplicateSelected', 'saveDriveLink', 'clearDriveLink', 'findDriveLinkBySku', 'handleBackupClick', 'handleRestoreClick',
- 'handleVersionHistoryClick', 'reportStuckBase64Photos', 'syncToGoogleSheet', 'submitToConsolidated'].forEach(n => {
+ 'handleVersionHistoryClick', 'exportToPDF', 'reportStuckBase64Photos', 'syncToGoogleSheet', 'submitToConsolidated'].forEach(n => {
     const f = window[n];
     if (typeof f !== 'function') return;
     window[n] = function (...a) { if (!isFullAccess()) { showToast('🔒', 'View-only access: you can preview reports only.'); return; } return f.apply(this, a); };
