@@ -314,7 +314,7 @@
                  CTQ, Engineering Blueprint, Material Component) are currently switched on.
                  Lives inside sheet1-view so it only shows up while you're actually in the
                  editor, not on other screens. -->
-            <div style="position:fixed;bottom:20px;right:20px;z-index:40">
+            <div style="position:fixed;bottom:20px;right:20px;z-index:40;display:flex;flex-direction:column;align-items:flex-end">
                 <!-- Live save status — pinned right above the quick-nav button so it's always
                      visible on screen no matter how far you've scrolled, instead of sitting up
                      at the top of the form where it would scroll out of view. -->
@@ -1174,8 +1174,7 @@ function removeDynamicPrintPageSize() {
 }
 
 async function exportToPDF(item) {
-    const ok = await requirePassword('exportme', { title: 'Confirm Export', sub: 'Enter the password to export this item to PDF.' });
-    if (!ok) return;
+    // no password: only the three editors can reach Export (view-only users are blocked)
     applyDynamicPrintPageSize(computeReportPrintPageHeight());
     document.body.classList.add('printing-report');
     // Chrome's "Save as PDF" dialog suggests document.title as the default filename —
@@ -1409,8 +1408,7 @@ async function autoFillFromSKU(sku) {
 }
 
 async function submitToConsolidated(skipConfirm = false) {
-    const ok = await requirePassword('submitme', { title: 'Confirm Submission', sub: 'Enter the password to submit this item to the Consolidated Manager.' });
-    if (!ok) return;
+    // no password: only the three editors can reach Submit (view-only users are blocked)
     if (!editorItem.description.trim()) {
         showToast('⚠️', 'Please enter an Item Description before submitting.');
         document.querySelector('[oninput*=".description"]')?.focus();
@@ -3797,7 +3795,7 @@ function buildReportHTMLRaw(item) {
     </div>`;
     })()}
 
-    ${item.show_master_carton!==false ? `
+    ${(item.show_master_carton!==false && (['mc_l','mc_w','mc_h','mc_weight','mc_qty','mc_remarks'].some(k=>String(item[k]==null?'':item[k]).trim()) || masterCartonPhotoKeys.some(p=>item[p.key]))) ? `
     <div class="report-page">
     <div class="page-label">${pageLabel()}</div>
     <div style="background:#fff;padding:20px">
@@ -3865,7 +3863,7 @@ function buildReportHTMLRaw(item) {
         </div>
     </div>` : ''}
 
-    ${item.show_gift_box!==false ? `
+    ${(item.show_gift_box!==false && (['gb_l','gb_w','gb_h','gb_weight','gb_qty','gb_remarks','gb_artwork'].some(k=>String(item[k]==null?'':item[k]).trim()) || giftBoxPhotoKeys.some(p=>item[p.key]))) ? `
     <div class="report-page">
     <div class="page-label">${pageLabel()}</div>
     <div style="background:#fff;padding:20px">
