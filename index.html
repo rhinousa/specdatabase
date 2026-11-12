@@ -347,6 +347,7 @@
                     <p class="text-xs text-gray-500 mt-0.5">All submitted product specifications.</p>
                 </div>
                 <div class="flex items-center gap-2">
+                    <div id="active-users" class="flex items-center mr-3" title="People using the Spec Database right now"></div>
                     <button onclick="duplicateSelected()" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-xs font-bold px-4 py-2 rounded-lg cursor-pointer transition flex items-center gap-1.5">
                         📋 Duplicate Selected
                     </button>
@@ -5809,7 +5810,8 @@ function triggerPhotoUpload(type, mIdx, key, sIdx = null) {
 // ============================================================
 const PRESENCE_FOLDER_NAME = 'Presence';
 const PRESENCE_BEAT_MS = 30000;
-const PRESENCE_STALE_MS = 95000;
+const PRESENCE_STALE_MS = 150000;
+let presenceOnline = [], presenceWriteDenied = false;
 let presenceFolderId = null;
 let presenceFileId = null;
 let presenceOthers = [];
@@ -5851,8 +5853,8 @@ async function writeMyPresence(editing) {
         }
     }
     const state = editing
-        ? { user: currentEditorName(), sku: editorItem.sku_no || '(new item)', itemId: editingIdx !== null && editorItem.id ? String(editorItem.id) : null, at: Date.now() }
-        : { user: currentEditorName(), sku: null, itemId: null, at: Date.now() };
+        ? { user: currentEditorName(), sku: editorItem.sku_no || '(new item)', itemId: editingIdx !== null && editorItem.id ? String(editorItem.id) : null, at: Date.now(), online: true }
+        : { user: currentEditorName(), sku: null, itemId: null, at: Date.now(), online: true };
     await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${presenceFileId}?supportsAllDrives=true`, 'PATCH', { description: JSON.stringify(state) });
 }
 async function pollPresence() {
@@ -5863,16 +5865,20 @@ async function pollPresence() {
         const r = await gdriveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,description)&pageSize=50&supportsAllDrives=true&includeItemsFromAllDrives=true`);
         const now = Date.now();
         presenceOthers = [];
+        presenceOnline = [];
         (r.files || []).forEach(f => {
             if (f.id === presenceFileId || f.name === `Presence-${presenceWho()}.json`) return;
             try {
                 const st = JSON.parse(f.description || '{}');
-                if (st.sku && st.at && now - st.at < PRESENCE_STALE_MS) {
+                const fresh = st.at && now - st.at < PRESENCE_STALE_MS;
+                if (fresh && st.online !== false && st.user) presenceOnline.push({ user: st.user, initials: presenceInitials(st.user), sku: st.sku || null });
+                if (st.sku && fresh) {
                     presenceOthers.push({ user: st.user, initials: presenceInitials(st.user), sku: st.sku, itemId: st.itemId });
                 }
             } catch (e) {}
         });
         updatePresenceBadges();
+        renderActiveUsers();
     } catch (e) { console.warn('Presence poll failed:', e.message); }
 }
 async function presenceBeat() {
@@ -5880,7 +5886,10 @@ async function presenceBeat() {
     presenceBusy = true;
     try {
         const editing = isEditingNow();
-        if (editing || presenceFileId) await writeMyPresence(editing);
+        if (!presenceWriteDenied) {            // everyone announces "I'm here"; view-only users may not have write access to the folder
+            try { await writeMyPresence(editing); }
+            catch (e) { if (!isFullAccess()) presenceWriteDenied = true; else throw e; }
+        }
         await pollPresence();
     } catch (e) { console.warn('Presence beat failed:', e.message); }
     finally { presenceBusy = false; }
@@ -5888,8 +5897,31 @@ async function presenceBeat() {
 function releasePresence() {
     if (!presenceFileId || !driveSessionIsLive()) return;
     gdriveFetch(`https://www.googleapis.com/drive/v3/files/${presenceFileId}?supportsAllDrives=true`, 'PATCH',
-        { description: JSON.stringify({ user: currentEditorName(), sku: null, itemId: null, at: Date.now() }) }).catch(() => {});
+        { description: JSON.stringify({ user: currentEditorName(), sku: null, itemId: null, at: Date.now(), online: true }) }).catch(() => {});
 }
+// Everyone who has the app open right now: initials circles at the top right of the Consolidated Manager
+function renderActiveUsers() {
+    const el = document.getElementById('active-users'); if (!el) return;
+    const me = currentEditorName();
+    const seen = new Set([String(me).toLowerCase()]);
+    const people = [{ user: me, initials: presenceInitials(me), sku: null, self: true }];
+    presenceOnline.forEach(o => { const k = String(o.user).toLowerCase(); if (!seen.has(k)) { seen.add(k); people.push(o); } });
+    const MAX = 6, shown = people.slice(0, MAX), more = people.length - shown.length;
+    const circle = (bg, fg, txt, title, ring) => `<span title="${escHtmlS(title)}" style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:${bg};color:${fg};font-size:10px;font-weight:900;margin-left:-3px;box-shadow:0 0 0 2px ${ring};cursor:default">${escHtmlS(txt)}</span>`;
+    el.innerHTML = shown.map(p => circle(presenceColor(p.user), '#000', p.initials,
+        p.user + (p.self ? ' (you)' : '') + (p.sku ? ' — editing ' + p.sku : ' — online'), p.self ? '#44D62C' : '#0b1220')).join('')
+        + (more > 0 ? circle('#374151', '#e5e7eb', '+' + more, people.slice(MAX).map(p => p.user).join(', '), '#0b1220') : '');
+    el.style.paddingLeft = '6px';
+}
+// best effort when the tab is closed: mark me offline right away instead of waiting for the timeout
+window.addEventListener('pagehide', () => {
+    try {
+        if (!presenceFileId || !gdriveToken) return;
+        fetch(`https://www.googleapis.com/drive/v3/files/${presenceFileId}?supportsAllDrives=true`, { method: 'PATCH', keepalive: true,
+            headers: { 'Authorization': 'Bearer ' + gdriveToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: JSON.stringify({ user: currentEditorName(), sku: null, itemId: null, at: Date.now(), online: false }) }) });
+    } catch (e) {}
+});
 function startPresenceHeartbeat() {
     if (window._presenceStarted) return;
     window._presenceStarted = true;
@@ -6117,6 +6149,7 @@ function resetGoogleSignInButton() {
 }
 
 function doLogout() {
+    try { if (presenceFileId && driveSessionIsLive()) gdriveFetch(`https://www.googleapis.com/drive/v3/files/${presenceFileId}?supportsAllDrives=true`, 'PATCH', { description: JSON.stringify({ user: currentEditorName(), sku: null, itemId: null, at: Date.now(), online: false }) }).catch(() => {}); } catch (e) {}
     sessionStorage.removeItem(AUTH_KEY);
     currentUser = null;
     gdriveToken = null;
@@ -7261,7 +7294,7 @@ function tryDeepLink() {
         if (s && currentUser) { showToast('⚠️', 'No item found for SKU "' + s + '".'); pendingDeepSku = null; pendingDeepEdit = null; }
     }, 30000);
     const bcv = window.buildConsolidatedView;
-    window.buildConsolidatedView = function () { try { applyAccessMode(); } catch (e) {} const r = bcv.apply(this, arguments); try { tryDeepLink(); } catch (e) { console.error(e); } return r; };
+    window.buildConsolidatedView = function () { try { applyAccessMode(); } catch (e) {} const r = bcv.apply(this, arguments); try { renderActiveUsers(); } catch (e) {} try { tryDeepLink(); } catch (e) { console.error(e); } return r; };
     // The real sign-in path is onGoogleConnected() (postLoginInit is never called), so the access
     // level has to be applied here — otherwise everyone sees the full editor UI.
     const ogc = window.onGoogleConnected;
@@ -7296,8 +7329,6 @@ function tryDeepLink() {
         tryDeepLink();
         return r;
     };
-    const pb = window.presenceBeat;                       // viewers never write presence markers
-    window.presenceBeat = function () { if (!isFullAccess()) return Promise.resolve(); return pb.apply(this, arguments); };
     const std = window.saveToDrive;                       // viewers never write to the Sheet
     window.saveToDrive = function () { if (!isFullAccess()) return Promise.resolve(true); return std.apply(this, arguments); };
 })();
