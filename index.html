@@ -347,7 +347,7 @@
                     <p class="text-xs text-gray-500 mt-0.5">All submitted product specifications.</p>
                 </div>
                 <div class="flex items-center gap-2">
-                    <div id="active-users" class="flex items-center mr-3" title="People using the Spec Database right now"></div>
+                    <div id="active-users" class="flex items-center mr-3"></div>
                     <button onclick="duplicateSelected()" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-xs font-bold px-4 py-2 rounded-lg cursor-pointer transition flex items-center gap-1.5">
                         📋 Duplicate Selected
                     </button>
@@ -5907,10 +5907,17 @@ function renderActiveUsers() {
     const people = [{ user: me, initials: presenceInitials(me), sku: null, self: true }];
     presenceOnline.forEach(o => { const k = String(o.user).toLowerCase(); if (!seen.has(k)) { seen.add(k); people.push(o); } });
     const MAX = 6, shown = people.slice(0, MAX), more = people.length - shown.length;
-    const circle = (bg, fg, txt, title, ring) => `<span title="${escHtmlS(title)}" style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:${bg};color:${fg};font-size:10px;font-weight:900;margin-left:-3px;box-shadow:0 0 0 2px ${ring};cursor:default">${escHtmlS(txt)}</span>`;
+    if (!document.getElementById('au-css')) {
+        const st = document.createElement('style'); st.id = 'au-css';
+        st.textContent = '.au-c{position:relative}.au-c .au-tip{display:none;position:absolute;top:38px;right:0;z-index:60;background:#111827;border:1px solid #374151;color:#f3f4f6;border-radius:8px;padding:6px 10px;white-space:nowrap;font:700 12px Arial,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.5);pointer-events:none}.au-c:hover .au-tip{display:block}.au-c .au-sub{display:block;font-weight:400;font-size:10px;color:#9ca3af;margin-top:2px}';
+        document.head.appendChild(st);
+    }
+    // hovering a circle pops up "AT - Aivan Tioco" (and what that person is doing)
+    const circle = (bg, fg, txt, name, sub, ring) => `<span class="au-c" style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:${bg};color:${fg};font-size:10px;font-weight:900;margin-left:-3px;box-shadow:0 0 0 2px ${ring};cursor:default">${escHtmlS(txt)}<span class="au-tip">${escHtmlS(name)}<span class="au-sub">${escHtmlS(sub)}</span></span></span>`;
+    el.removeAttribute('title');
     el.innerHTML = shown.map(p => circle(presenceColor(p.user), '#000', p.initials,
-        p.user + (p.self ? ' (you)' : '') + (p.sku ? ' — editing ' + p.sku : ' — online'), p.self ? '#44D62C' : '#0b1220')).join('')
-        + (more > 0 ? circle('#374151', '#e5e7eb', '+' + more, people.slice(MAX).map(p => p.user).join(', '), '#0b1220') : '');
+        p.initials + ' - ' + p.user + (p.self ? ' (you)' : ''), p.sku ? 'Editing ' + p.sku : 'Online now', p.self ? '#44D62C' : '#0b1220')).join('')
+        + (more > 0 ? circle('#374151', '#e5e7eb', '+' + more, '+' + more + ' more online', people.slice(MAX).map(p => p.user).join(', '), '#0b1220') : '');
     el.style.paddingLeft = '6px';
 }
 // best effort when the tab is closed: mark me offline right away instead of waiting for the timeout
