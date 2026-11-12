@@ -6470,7 +6470,10 @@ async function saveToDrive(data, forceSnapshot = false) {
         changed.forEach(it => {
             const id = String(it.id);
             const ex = Object.assign({}, sdbExtras.get(id) || {});
-            if (sdbClearStatusIds.has(id)) { const k = headers[headers.map(sdbNorm).indexOf('status')]; if (k) ex[k] = ''; }
+            if (sdbClearStatusIds.has(id)) {
+                const k = headers[headers.map(sdbNorm).indexOf('status')]; if (k) ex[k] = '';
+                const k2 = headers[headers.map(sdbNorm).indexOf('lock time')]; if (k2) ex[k2] = '';
+            }
             const rowArr = sdbItemRow(it, headers, ex);
             if (rowById.has(id)) updates.push({ range: `Items!A${rowById.get(id)}`, values: [rowArr] });
             else appends.push(rowArr);
@@ -6556,7 +6559,7 @@ function askThree({ title, sub, a, b, c }) {
 (function installExit() {
     const orig = window.exitEditor;
     window.exitEditor = async function () {
-        if (!editorHasChanges()) return orig.apply(this, arguments);        // nothing to lose: original behaviour
+        if (!editorHasChanges()) { try { await sdbLockRelease(); } catch (e) {} return orig.apply(this, arguments); }   // nothing to lose: free the item, then original behaviour
         const pick = await askThree({
             title: 'You have unsaved changes',
             sub: 'Submit them now, keep editing, or discard this draft. Discarding removes your draft and any unfinished row it created in the sheet.',
@@ -6709,6 +6712,7 @@ async function sdbSheetState() {
 async function sdbEnsureLiveHeaders(headers, needChunks) {
     let changed = false;
     if (!headers.map(sdbNorm).includes('status')) { headers.push('Status'); changed = true; }
+    if (!headers.map(sdbNorm).includes('lock time')) { headers.push('Lock Time'); changed = true; }
     const have = sdbDataColIndexes(headers).length;
     for (let n = have + 1; n <= needChunks; n++) { headers.push('Data ' + n); changed = true; }
     if (changed) {
@@ -6725,6 +6729,8 @@ async function sdbWriteRow(item, row, status, state) {
     let headers = await sdbEnsureLiveHeaders(st.headers, sdbChunks(JSON.stringify(item)).length);
     const key = sdbStatusKey(headers), id = String(item.id);
     const extras = Object.assign({}, sdbExtras.get(id) || {}); extras[key] = status;
+    const lk = headers[headers.map(sdbNorm).indexOf('lock time')];
+    if (lk) extras[lk] = status ? String(Date.now()) : '';          // edit-lock timestamp (cleared when the item is released)
     const rowArr = sdbItemRow(item, headers, extras);
     sdbExtras.set(id, extras);
     if (status) sdbStatus.set(id, status); else sdbStatus.delete(id);
@@ -7079,6 +7085,114 @@ async function muRun() {
 
 
 // ============================================================
+// EDIT LOCK — only one person can have an existing item open for editing at a time.
+// The lock is two cells on the item's row: Status ("In progress – by NAME") + Lock Time (ms).
+// It is taken when the item is opened, refreshed every minute, released on Submit / Discard / Exit,
+// and frees itself after 10 minutes without a refresh (closed tab, sleeping laptop, lost connection).
+// ============================================================
+const SDB_LOCK_STALE_MS = 10 * 60 * 1000, SDB_LOCK_BEAT_MS = 60 * 1000;
+let sdbLockLost = false, sdbLockCheckedAt = 0;
+function sdbLockOwner(status) { const m = /^In progress\s*[–-]\s*by\s+(.+)$/i.exec(String(status || '').trim()); return m ? m[1].trim() : ''; }
+function sdbLockBlocker(r) {                       // name of the person who holds a live lock on this row, else ''
+    const owner = sdbLockOwner(r && r.status);
+    if (!owner || owner === currentEditorName()) return '';
+    return (r.lock && (Date.now() - r.lock) < SDB_LOCK_STALE_MS) ? owner : '';
+}
+async function sdbLockRead(id, sku) {
+    const st = await sdbSheetState();
+    const headers = await sdbEnsureLiveHeaders(st.headers, 1);
+    const norm = headers.map(sdbNorm), sc = norm.indexOf('status'), lc = norm.indexOf('lock time');
+    let f = id ? st.rows.find(r => r.id === String(id)) : null;
+    if (!f && sku) f = st.rows.find(r => r.sku.toLowerCase() === String(sku).trim().toLowerCase());
+    const out = { headers, sc, lc, row: f ? f.row : null, status: '', lock: 0 };
+    if (!f) return out;
+    const bg = await gdriveFetch(`${SDB_API}/values:batchGet?ranges=${sdbEnc('Items!' + sdbColLetter(sc) + f.row)}&ranges=${sdbEnc('Items!' + sdbColLetter(lc) + f.row)}`);
+    const cell = i => sdbStr(bg.valueRanges[i] && bg.valueRanges[i].values && bg.valueRanges[i].values[0] && bg.valueRanges[i].values[0][0]).trim();
+    out.status = cell(0); out.lock = parseInt(cell(1), 10) || 0;
+    return out;
+}
+async function sdbLockWrite(r, status, time) {
+    await gdriveFetch(`${SDB_API}/values:batchUpdate`, 'POST', { valueInputOption: 'RAW', data: [
+        { range: 'Items!' + sdbColLetter(r.sc) + r.row, values: [[status]] },
+        { range: 'Items!' + sdbColLetter(r.lc) + r.row, values: [[time ? String(time) : '']] } ] });
+}
+async function sdbLockRelease() {                  // free the item I have open (only if the lock is mine)
+    if (!editorLiveId || editingIdx === null || !driveSessionIsLive()) return;
+    const id = String(editorLiveId);
+    const r = await sdbLockRead(id, editorItem && editorItem.sku_no);
+    if (r.row && sdbLockOwner(r.status) === currentEditorName()) { await sdbLockWrite(r, '', 0); sdbStatus.delete(id); }
+}
+function sdbLockLostNow(by) {
+    if (sdbLockLost) return;
+    sdbLockLost = true; clearTimeout(sdbLiveTimer);
+    showToast('🔒', `${by} has taken over this item (your lock expired). Copy anything you need, then reload the page and open the item again. Your changes were NOT saved over theirs.`, null, null, 30000);
+    try { sdbLiveStatus('warn', 'Lock lost — ' + by + ' is editing this item'); } catch (e) {}
+}
+window.editItem = async function (idx) {
+    const item = currentData.main_items[idx]; if (!item) return;
+    const ok = await requirePassword('editme', { title: 'Edit Access', sub: 'Enter the password to edit this item.' });
+    if (!ok) return;
+    if (!driveSessionIsLive()) { showToast('🔒', 'Connect to Google before editing, so the item can be locked for you.'); return; }
+    const me = currentEditorName();
+    try {
+        showSubmitBusy('Checking that nobody else is editing this item…');
+        const r = await sdbLockRead(item.id, item.sku_no);
+        const by = sdbLockBlocker(r);
+        if (by) {
+            hideSubmitBusy();
+            const mins = Math.max(1, Math.round((Date.now() - r.lock) / 60000));
+            showToast('🔒', `${by} is editing ${item.sku_no} (active ${mins} min ago). Try again after they submit. A lock frees itself after 10 minutes of inactivity.`, null, null, 15000);
+            return;
+        }
+        if (r.row) { await sdbLockWrite(r, `In progress – by ${me}`, Date.now()); sdbStatus.set(String(item.id), `In progress – by ${me}`); }
+    } catch (e) {
+        hideSubmitBusy();
+        showToast('⚠️', 'Could not check the edit lock (' + e.message + '). The item was not opened, to protect other people\'s work. Try again.', null, null, 15000);
+        return;
+    }
+    hideSubmitBusy();
+    sdbLockLost = false; sdbLockCheckedAt = Date.now();
+    initEditorForm(item, idx);
+    setTimeout(presenceBeat, 300);
+    updateEditTabVisibility();
+    switchSheet('edit');
+};
+(function installLock() {
+    const ief = window.initEditorForm;
+    window.initEditorForm = function () { sdbLockLost = false; return ief.apply(this, arguments); };
+    const lsn = window.sdbLiveSaveNow;                  // never write over someone else's lock
+    window.sdbLiveSaveNow = async function () {
+        if (sdbLockLost) return;
+        if (editorLiveId && !editorLiveNew && Date.now() - sdbLockCheckedAt > 45000 && driveSessionIsLive()) {
+            sdbLockCheckedAt = Date.now();
+            try { const r = await sdbLockRead(editorLiveId, editorItem && editorItem.sku_no); const by = sdbLockBlocker(r); if (by) { sdbLockLostNow(by); return; } } catch (e) {}
+        }
+        return lsn.apply(this, arguments);
+    };
+    const fin = window.finalizeSubmitToConsolidated;    // Submit: refuse if someone else holds the item now
+    window.finalizeSubmitToConsolidated = async function () {
+        if (editorLiveId && driveSessionIsLive()) {
+            try {
+                const r = await sdbLockRead(editorLiveId, editorItem && editorItem.sku_no);
+                const by = sdbLockBlocker(r);
+                if (by || sdbLockLost) { sdbLockLost = true; return { ok: false, reason: `${by || 'someone else'} took over this item while it was open here — nothing was overwritten. Copy your changes, reload, and edit again` }; }
+            } catch (e) { /* could not read the lock: the normal verified submit continues */ }
+        }
+        return fin.apply(this, arguments);
+    };
+    setInterval(async () => {                           // keep my lock alive while the item is open
+        if (!editorLiveId || sdbLockLost || !editorItem || !isFullAccess() || !driveSessionIsLive()) return;
+        try {
+            const r = await sdbLockRead(editorLiveId, editorItem.sku_no);
+            const by = sdbLockBlocker(r);
+            if (by) { sdbLockLostNow(by); return; }
+            if (r.row && sdbLockOwner(r.status) === currentEditorName()) await sdbLockWrite(r, r.status, Date.now());
+        } catch (e) { console.warn('Lock refresh failed:', e.message); }
+    }, SDB_LOCK_BEAT_MS);
+})();
+
+
+// ============================================================
 // ACCESS LEVELS — everyone outside this list is view-only (Consolidated list + report preview only)
 // NOTE: this hides/blocks the controls in the app. Real protection = share the Google Sheet with
 // everyone else as "Viewer" (see Share button in the sheet).
@@ -7124,18 +7238,29 @@ function applyAccessMode() {
 // Deep link (#sku=...): the item list is loaded from the Sheet a moment AFTER sign-in, so keep the
 // requested SKU pending and open its preview as soon as the list that contains it has been built.
 let pendingDeepSku = (() => { const m = location.hash.match(/[#&]sku=([^&]+)/); try { return m ? decodeURIComponent(m[1]).trim() : null; } catch (e) { return null; } })();
+// #edit=<SKU>: address of an existing item while it is open in the editor (editors only; others get the preview)
+let pendingDeepEdit = (() => { const m = location.hash.match(/[#&]edit=([^&]+)/); try { return m ? decodeURIComponent(m[1]).trim() : null; } catch (e) { return null; } })();
 function tryDeepLink() {
-    if (!pendingDeepSku || !currentUser) return;
-    const want = pendingDeepSku.toLowerCase();
-    const i = (currentData.main_items || []).findIndex(m => String(m.sku_no || '').trim().toLowerCase() === want);
+    if ((!pendingDeepSku && !pendingDeepEdit) || !currentUser) return;
+    const find = s => (currentData.main_items || []).findIndex(m => String(m.sku_no || '').trim().toLowerCase() === s.toLowerCase());
+    if (pendingDeepEdit) {
+        const i = find(pendingDeepEdit);
+        if (i < 0) return;
+        pendingDeepEdit = null;
+        try { window.switchSheet('consolidated'); } catch (e) {}
+        if (isFullAccess()) editItem(i); else openPdfReport(i);   // editItem asks for the edit password as usual
+        return;
+    }
+    const i = find(pendingDeepSku);
     if (i < 0) return;
     pendingDeepSku = null;
     try { window.switchSheet('consolidated'); } catch (e) {}
     openPdfReport(i);
 }
 (function () {
-    if (pendingDeepSku) setTimeout(() => {
-        if (pendingDeepSku && currentUser) { showToast('⚠️', 'No item found for SKU "' + pendingDeepSku + '".'); pendingDeepSku = null; }
+    if (pendingDeepSku || pendingDeepEdit) setTimeout(() => {
+        const s = pendingDeepEdit || pendingDeepSku;
+        if (s && currentUser) { showToast('⚠️', 'No item found for SKU "' + s + '".'); pendingDeepSku = null; pendingDeepEdit = null; }
     }, 30000);
     const bcv = window.buildConsolidatedView;
     window.buildConsolidatedView = function () { try { applyAccessMode(); } catch (e) {} const r = bcv.apply(this, arguments); try { tryDeepLink(); } catch (e) { console.error(e); } return r; };
@@ -7156,7 +7281,13 @@ function tryDeepLink() {
     const sw = window.switchSheet;
     window.switchSheet = function (key) {
         if (!isFullAccess() && ['sheet1', 'edit', 'revision'].includes(key)) key = 'consolidated';
-        return sw.call(this, key);
+        const r = sw.call(this, key);
+        try {
+            // editing an existing item gets its own address: …/#edit=<SKU>
+            if (key === 'edit' && editingIdx !== null && editorItem && editorItem.sku_no) history.replaceState(null, '', '#edit=' + encodeURIComponent(editorItem.sku_no));
+            else if (key !== 'edit' && /[#&]edit=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
+        } catch (e) {}
+        return r;
     };
     const pli = window.postLoginInit;
     window.postLoginInit = async function () {
