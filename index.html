@@ -5811,7 +5811,7 @@ function triggerPhotoUpload(type, mIdx, key, sIdx = null) {
 const PRESENCE_FOLDER_NAME = 'Presence';
 const PRESENCE_BEAT_MS = 30000;
 const PRESENCE_STALE_MS = 150000;
-let presenceOnline = [], presenceWriteDenied = false;
+let presenceOnline = [], presenceWriteDenied = false, presenceError = '', presenceWriteError = '';
 let presenceFolderId = null;
 let presenceFileId = null;
 let presenceOthers = [];
@@ -5877,9 +5877,10 @@ async function pollPresence() {
                 }
             } catch (e) {}
         });
+        presenceError = '';
         updatePresenceBadges();
         renderActiveUsers();
-    } catch (e) { console.warn('Presence poll failed:', e.message); }
+    } catch (e) { console.warn('Presence poll failed:', e.message); presenceError = 'could not check others: ' + e.message; try { renderActiveUsers(); } catch (e2) {} }
 }
 async function presenceBeat() {
     if (presenceBusy || !driveSessionIsLive()) return;
@@ -5887,8 +5888,8 @@ async function presenceBeat() {
     try {
         const editing = isEditingNow();
         if (!presenceWriteDenied) {            // everyone announces "I'm here"; view-only users may not have write access to the folder
-            try { await writeMyPresence(editing); }
-            catch (e) { if (!isFullAccess()) presenceWriteDenied = true; else throw e; }
+            try { await writeMyPresence(editing); presenceWriteError = ''; }
+            catch (e) { if (!isFullAccess()) presenceWriteDenied = true; else { presenceWriteError = "could not announce you: " + e.message; throw e; } }
         }
         await pollPresence();
     } catch (e) { console.warn('Presence beat failed:', e.message); }
@@ -5916,7 +5917,9 @@ function renderActiveUsers() {
     const circle = (bg, fg, txt, name, sub, ring) => `<span class="au-c" style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:${bg};color:${fg};font-size:10px;font-weight:900;margin-left:-3px;box-shadow:0 0 0 2px ${ring};cursor:default">${escHtmlS(txt)}<span class="au-tip">${escHtmlS(name)}<span class="au-sub">${escHtmlS(sub)}</span></span></span>`;
     el.removeAttribute('title');
     el.innerHTML = shown.map(p => circle(presenceColor(p.user), '#000', p.initials,
-        p.initials + ' - ' + p.user + (p.self ? ' (you)' : ''), p.sku ? 'Editing ' + p.sku : 'Online now', p.self ? '#44D62C' : '#0b1220')).join('')
+        p.initials + ' - ' + p.user + (p.self ? ' (you)' : ''),
+        p.self ? ((p.sku ? 'Editing ' + p.sku : 'Online now') + (presenceWriteError ? ' — ' + presenceWriteError : presenceError ? ' — ' + presenceError : presenceWriteDenied ? ' — others cannot see you (no write access to the Presence folder)' : '')) : (p.sku ? 'Editing ' + p.sku : 'Online now'),
+        p.self ? '#44D62C' : '#0b1220')).join('')
         + (more > 0 ? circle('#374151', '#e5e7eb', '+' + more, '+' + more + ' more online', people.slice(MAX).map(p => p.user).join(', '), '#0b1220') : '');
     el.style.paddingLeft = '6px';
 }
@@ -7321,6 +7324,8 @@ function tryDeepLink() {
     window.onGoogleConnected = async function () {
         try { applyAccessMode(); } catch (e) {}
         const r = await ogc.apply(this, arguments);
+        // postLoginInit (which started these) is never called on the real sign-in path, so start them here
+        try { startSessionExpiryMonitor(); startPresenceHeartbeat(); } catch (e) { console.error(e); }
         if (applyAccessMode()) { try { window.switchSheet('consolidated'); buildConsolidatedView(); } catch (e) {} }
         try { tryDeepLink(); } catch (e) {}
         return r;
