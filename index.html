@@ -7276,6 +7276,19 @@ function applyAccessMode() {
 // Deep link (#sku=...): the item list is loaded from the Sheet a moment AFTER sign-in, so keep the
 // requested SKU pending and open its preview as soon as the list that contains it has been built.
 let pendingDeepSku = (() => { const m = location.hash.match(/[#&]sku=([^&]+)/); try { return m ? decodeURIComponent(m[1]).trim() : null; } catch (e) { return null; } })();
+// Keep the list in ID order (1, 2, 3 …) even when an item was deleted and a new one fills the gap or was added later.
+function sdbSortItems() {
+    const list = currentData && currentData.main_items; if (!list || list.length < 2) return;
+    const num = it => { const n = parseInt(it && it.id, 10); return Number.isFinite(n) ? n : Infinity; };
+    let ordered = true;
+    for (let i = 1; i < list.length; i++) if (num(list[i - 1]) > num(list[i])) { ordered = false; break; }
+    if (ordered) return;
+    const keepId = (idx) => (idx !== null && idx !== undefined && list[idx]) ? String(list[idx].id) : null;
+    const editId = keepId(editingIdx), pdfId = keepId(currentPdfIdx);
+    list.sort((a, b) => num(a) - num(b));           // stable: items with equal/unknown ids keep their order
+    if (editId) editingIdx = list.findIndex(x => String(x.id) === editId);
+    if (pdfId) currentPdfIdx = list.findIndex(x => String(x.id) === pdfId);
+}
 // #edit=<SKU>: address of an existing item while it is open in the editor (editors only; others get the preview)
 let pendingDeepEdit = (() => { const m = location.hash.match(/[#&]edit=([^&]+)/); try { return m ? decodeURIComponent(m[1]).trim() : null; } catch (e) { return null; } })();
 function tryDeepLink() {
@@ -7301,7 +7314,7 @@ function tryDeepLink() {
         if (s && currentUser) { showToast('⚠️', 'No item found for SKU "' + s + '".'); pendingDeepSku = null; pendingDeepEdit = null; }
     }, 30000);
     const bcv = window.buildConsolidatedView;
-    window.buildConsolidatedView = function () { try { applyAccessMode(); } catch (e) {} const r = bcv.apply(this, arguments); try { renderActiveUsers(); } catch (e) {} try { tryDeepLink(); } catch (e) { console.error(e); } return r; };
+    window.buildConsolidatedView = function () { try { applyAccessMode(); } catch (e) {} try { sdbSortItems(); } catch (e) { console.error(e); } const r = bcv.apply(this, arguments); try { renderActiveUsers(); } catch (e) {} try { tryDeepLink(); } catch (e) { console.error(e); } return r; };
     // The real sign-in path is onGoogleConnected() (postLoginInit is never called), so the access
     // level has to be applied here — otherwise everyone sees the full editor UI.
     const ogc = window.onGoogleConnected;
