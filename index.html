@@ -6482,10 +6482,10 @@ const SDB_DERIVED = new Set(['revisions', 'last editor', 'last revision reason']
 const SDB_PACK_HEADERS = ['Blister L (cm)', 'Blister W (cm)', 'Blister H (cm)', 'Blister Weight', 'Blister Qty', 'Blister UoM', 'Blister Remarks', 'Show Blister'];
 function sdbMissingPackHeaders(headers) { const have = new Set(headers.map(sdbNorm)); return SDB_PACK_HEADERS.filter(h => !have.has(sdbNorm(h))); }
 
-async function loadFromDriveFile() {
+async function loadFromDriveFile(src) {          // src (optional): {values:[headerRow, ...rows]} to parse only some rows (used by the live refresh)
     if (!gdriveEnabled || !gdriveToken) return null;
     try {
-        const r = await gdriveFetch(`${SDB_API}/values/Items?valueRenderOption=FORMATTED_VALUE`);
+        const r = src || await gdriveFetch(`${SDB_API}/values/Items?valueRenderOption=FORMATTED_VALUE`);
         const rows = (r && r.values) || [];
         if (!rows.length) return { main_items: [], users: (currentData && currentData.users && currentData.users.length) ? currentData.users : [...DEFAULT_USERS] };
         const headers = rows[0].map(String);
@@ -7217,6 +7217,158 @@ async function muRun() {
 
 
 // ============================================================
+// LIVE REFRESH — the Consolidated Manager follows the Sheet (checked every 3 seconds).
+// Each check reads only the small flat columns (no Data/photo JSON, no lock timestamps) in ONE request and
+// compares a signature per row. Only rows that changed are fetched in full, merged into the list, flashed
+// green, and announced. Pauses while the tab is hidden, the editor / PDF preview is open, or a save is running.
+// ============================================================
+const SDB_POLL_MS = 3000;
+let sdbSigMap = null, sdbPollHeaders = null, sdbPollBusy = false, sdbPollFail = 0, sdbPollStarted = false;
+let sdbLastMutation = 0, sdbWorking = 0;
+function sdbPollRuns(headers) {                       // contiguous column runs, skipping Data n and Lock Time
+    const runs = []; let from = -1;
+    headers.forEach((h, i) => {
+        const skip = !String(h || '').trim() || /^data\s*\d+$/i.test(String(h).trim()) || sdbNorm(h) === 'lock time';
+        if (skip) { if (from >= 0) { runs.push({ from, to: i - 1 }); from = -1; } }
+        else if (from < 0) from = i;
+    });
+    if (from >= 0) runs.push({ from, to: headers.length - 1 });
+    return runs;
+}
+async function sdbPollLight() {
+    let headers = sdbPollHeaders;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        if (!headers) { const hr = await gdriveFetch(`${SDB_API}/values/${sdbEnc('Items!1:1')}`); headers = ((hr.values || [[]])[0] || []).map(String); }
+        const runs = sdbPollRuns(headers);
+        const q = ['Items!1:1'].concat(runs.map(r => `Items!${sdbColLetter(r.from)}2:${sdbColLetter(r.to)}`)).map(x => 'ranges=' + sdbEnc(x)).join('&');
+        const bg = await gdriveFetch(`${SDB_API}/values:batchGet?${q}`);
+        const nowHeaders = (((bg.valueRanges[0] || {}).values || [[]])[0] || []).map(String);
+        if (JSON.stringify(nowHeaders) !== JSON.stringify(headers)) { headers = nowHeaders; if (attempt === 0) continue; }
+        sdbPollHeaders = headers;
+        const norm = headers.map(sdbNorm), idCol = norm.indexOf('id');
+        const rows = [];
+        runs.forEach((run, ri) => {
+            ((bg.valueRanges[ri + 1] || {}).values || []).forEach((rv, i) => {
+                if (!rows[i]) rows[i] = [];
+                rv.forEach((v, k) => { rows[i][run.from + k] = v; });
+            });
+        });
+        const sigs = new Map();
+        for (let i = 0; i < rows.length; i++) {
+            const cells = rows[i] || [];
+            const id = sdbStr(cells[idCol]).trim();
+            if (!id) continue;
+            sigs.set(id, { row: i + 2, sig: Array.from(cells, c => c == null ? '' : c).join('\u0001') });
+        }
+        return sigs;
+    }
+    return new Map();
+}
+function sdbPollReady() {
+    if (!currentUser || !gdriveEnabled || !driveSessionIsLive() || sdbPollBusy || sdbWorking > 0) return false;
+    if (document.visibilityState !== 'visible') return false;
+    if (Date.now() - sdbLastMutation < 6000) return false;
+    const cv = document.getElementById('consolidated-view'); if (!cv || cv.classList.contains('hidden')) return false;
+    const pp = document.getElementById('pdf-popup'); if (pp && pp.classList.contains('show')) return false;
+    return true;
+}
+async function sdbPollRun() {
+    sdbPollBusy = true;
+    try {
+        const sigs = await sdbPollLight();
+        const list = currentData.main_items || [];
+        const changed = [], removed = [];
+        if (!sdbSigMap) {                               // first check (or after my own save): only pick up rows this page doesn't have yet
+            const have = new Set(list.map(x => String(x.id)));
+            sigs.forEach((v, id) => { if (!have.has(id)) changed.push([id, v.row]); });
+        } else {
+            sigs.forEach((v, id) => { const o = sdbSigMap.get(id); if (!o || o.sig !== v.sig) changed.push([id, v.row]); });
+            sdbSigMap.forEach((v, id) => { if (!sigs.has(id)) removed.push(id); });
+        }
+        if (changed.length || removed.length) {
+            if (Date.now() - sdbLastMutation < 6000 || sdbWorking > 0) return;      // a save started meanwhile: try again next time
+            await sdbApplyRemote(changed, removed);
+        }
+        sdbSigMap = sigs;
+    } finally { sdbPollBusy = false; }
+}
+async function sdbApplyRemote(changed, removed) {
+    const list = currentData.main_items;
+    const me = currentEditorName();
+    const editId = (editingIdx !== null && list[editingIdx]) ? String(list[editingIdx].id) : null;
+    const flash = new Set(), notes = [];
+    if (changed.length) {
+        const q = changed.map(([id, row]) => 'ranges=' + sdbEnc(`Items!${row}:${row}`)).join('&');
+        const bg = await gdriveFetch(`${SDB_API}/values:batchGet?${q}`);
+        const rows = (bg.valueRanges || []).map(vr => ((vr && vr.values) || [[]])[0] || []);
+        const keepE = sdbExtras, keepS = sdbStatus, keepN = sdbNoData;
+        const part = await loadFromDriveFile({ values: [sdbPollHeaders].concat(rows) });     // parse only these rows
+        const newE = sdbExtras, newS = sdbStatus, newN = sdbNoData;
+        sdbExtras = keepE; sdbStatus = keepS; sdbNoData = keepN;                            // loader replaced the side tables: put the full ones back
+        if (!part) throw new Error('could not read the changed rows');
+        const byId = new Map(list.map((x, i) => [String(x.id), i]));
+        part.main_items.forEach(it => {
+            const id = String(it.id);
+            if (newE.has(id)) keepE.set(id, newE.get(id));
+            if (newS.has(id)) keepS.set(id, newS.get(id)); else keepS.delete(id);
+            if (newN.has(id)) keepN.add(id); else keepN.delete(id);
+            if (id === editId) return;                                                       // never replace the item open in the editor
+            const last = (it.revision_history || []).slice(-1)[0] || {};
+            if (byId.has(id)) {
+                const old = list[byId.get(id)];
+                list[byId.get(id)] = it;
+                if (last.editor && last.editor !== me && (it.revision_history || []).length > (old.revision_history || []).length) notes.push(`${last.editor} updated ${it.sku_no}`);
+            } else {
+                list.push(it);
+                if (last.editor && last.editor !== me) notes.push(`${last.editor} added ${it.sku_no}`);
+            }
+            flash.add(id);
+            itemBaseline.set(id, JSON.stringify(it));
+        });
+    }
+    removed.forEach(id => {
+        if (id === editId) return;
+        const i = list.findIndex(x => String(x.id) === id);
+        if (i >= 0) { notes.push(`${list[i].sku_no || 'An item'} was removed`); list.splice(i, 1); }
+        sdbExtras.delete(id); sdbStatus.delete(id); sdbNoData.delete(id); itemBaseline.delete(id);
+    });
+    if (editId) editingIdx = list.findIndex(x => String(x.id) === editId);
+    const q0 = (document.getElementById('consolidated-search') || {}).value || '';
+    buildConsolidatedView();
+    if (q0) { try { filterConsolidated(q0); } catch (e) {} }
+    try { updateConsolidatedBadge(); } catch (e) {}
+    document.querySelectorAll('#consolidated-grid tr[data-idx]').forEach(tr => {
+        const it = list[parseInt(tr.getAttribute('data-idx'), 10)];
+        if (it && flash.has(String(it.id))) tr.classList.add('sdb-flash');
+    });
+    if (notes.length) showToast('🔄', notes.length > 3 ? `${notes.length} items were updated by others.` : notes.join(' · '));
+}
+function sdbPollStart() {
+    if (sdbPollStarted) return;
+    sdbPollStarted = true;
+    const st = document.createElement('style');
+    st.textContent = '@keyframes sdbflash{0%{background:rgba(68,214,44,.38)}100%{background:transparent}}tr.sdb-flash td{animation:sdbflash 4s ease-out}';
+    document.head.appendChild(st);
+    const loop = async () => {
+        try { if (sdbPollReady()) await sdbPollRun(); sdbPollFail = 0; }
+        catch (e) { sdbPollFail++; console.warn('Live refresh:', e.message); }
+        setTimeout(loop, SDB_POLL_MS * Math.min(1 + sdbPollFail * 2, 10));              // backs off (up to 30 s) if Google says "too many requests"
+    };
+    setTimeout(loop, SDB_POLL_MS);
+}
+(function installLiveRefresh() {
+    ['saveData', 'finalizeSubmitToConsolidated'].forEach(n => {                         // never refresh the list while this page is saving
+        const f = window[n]; if (typeof f !== 'function') return;
+        window[n] = async function () { sdbWorking++; try { return await f.apply(this, arguments); } finally { sdbWorking--; sdbLastMutation = Date.now(); } };
+    });
+    ['triggerAutoSave', 'duplicateSelected', 'deleteItem'].forEach(n => {
+        const f = window[n]; if (typeof f !== 'function') return;
+        window[n] = function () { sdbLastMutation = Date.now(); return f.apply(this, arguments); };
+    });
+})();
+
+
+// ============================================================
 // EDIT LOCK — only one person can have an existing item open for editing at a time.
 // The lock is two cells on the item's row: Status ("In progress – by NAME") + Lock Time (ms).
 // It is taken when the item is opened, refreshed every minute, released on Submit / Discard / Exit,
@@ -7416,7 +7568,7 @@ function tryDeepLink() {
         try { applyAccessMode(); } catch (e) {}
         const r = await ogc.apply(this, arguments);
         // postLoginInit (which started these) is never called on the real sign-in path, so start them here
-        try { startSessionExpiryMonitor(); startPresenceHeartbeat(); } catch (e) { console.error(e); }
+        try { startSessionExpiryMonitor(); startPresenceHeartbeat(); sdbPollStart(); } catch (e) { console.error(e); }
         if (applyAccessMode()) { try { window.switchSheet('consolidated'); buildConsolidatedView(); } catch (e) {} }
         try { tryDeepLink(); } catch (e) {}
         return r;
