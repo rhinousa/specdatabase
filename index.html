@@ -3839,7 +3839,7 @@ function buildReportHTMLRaw(item) {
         </div>
     </div>` : ''}
 
-    ${item.show_inner_case ? `
+    ${(item.show_inner_case && (['ic_l','ic_w','ic_h','ic_weight','ic_qty','ic_remarks'].some(k=>String(item[k]==null?'':item[k]).trim()) || innerCasePhotoKeys.some(p=>item[p.key]))) ? `
     <div class="report-page">
     <div class="page-label">${pageLabel()}</div>
     <div style="background:#fff;padding:20px">
@@ -3847,7 +3847,7 @@ function buildReportHTMLRaw(item) {
         <table style="width:100%;border-collapse:collapse;border:1px solid #9ca3af;table-layout:fixed">
 
             <!-- INNER CASE -->
-            <tr style="background:#fce7f3"><td colspan="6" style="padding:8px;border:1px solid #9ca3af;text-align:center;font-weight:900;font-size:11px;text-transform:uppercase;color:#9d174d">INNER CASE PACKAGING SPECIFICATIONS</td></tr>
+            <tr style="background:#fef9c3"><td colspan="6" style="padding:8px;border:1px solid #9ca3af;text-align:center;font-weight:900;font-size:11px;text-transform:uppercase;color:#713f12">INNER CASE PACKAGING SPECIFICATIONS</td></tr>
             <tr>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Case Dim:</td>
                 <td colspan="3" style="padding:6px 10px;border:1px solid #9ca3af">
@@ -3917,7 +3917,7 @@ function buildReportHTMLRaw(item) {
         <table style="width:100%;border-collapse:collapse;border:1px solid #9ca3af;table-layout:fixed">
 
             <!-- BLISTER PACKAGING -->
-            <tr style="background:#cffafe"><td colspan="6" style="padding:8px;border:1px solid #9ca3af;text-align:center;font-weight:900;font-size:11px;text-transform:uppercase;color:#155e75">BLISTER PACKAGING SPECIFICATIONS</td></tr>
+            <tr style="background:#fef9c3"><td colspan="6" style="padding:8px;border:1px solid #9ca3af;text-align:center;font-weight:900;font-size:11px;text-transform:uppercase;color:#713f12">BLISTER PACKAGING SPECIFICATIONS</td></tr>
             <tr>
                 <td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Blister Dim:</td>
                 <td colspan="3" style="padding:6px 10px;border:1px solid #9ca3af">
@@ -3932,8 +3932,8 @@ function buildReportHTMLRaw(item) {
             ${item.show_bp_remarks!==false ? `<tr><td style="background:#f3f4f6;font-weight:700;border:1px solid #9ca3af;padding:6px 10px">Blister Remarks:</td><td colspan="5" style="padding:6px 10px;border:1px solid #9ca3af;font-style:italic">${item.bp_remarks||'—'}</td></tr>` : ''}
             ${blisterPhotoKeys.some(p=>item[p.key]) ? `<tr>
                 <td colspan="6" style="padding:16px;border:1px solid #9ca3af">
-                    <div style="display:grid;grid-template-columns:repeat(${Math.min(blisterPhotoKeys.filter(p=>item[p.key]).length,3)},1fr);gap:16px">
-                        ${blisterPhotoKeys.map(p=>photoBox(item[p.key], p.label, 300)).join('')}
+                    <div style="display:grid;grid-template-columns:repeat(${blisterPhotoKeys.filter(p=>item[p.key]).length>1?2:1},1fr);gap:16px">
+                        ${blisterPhotoKeys.map(p=>photoBox(item[p.key], p.label)).join('')}
                     </div>
                 </td>
             </tr>` : ''}
