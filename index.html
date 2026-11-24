@@ -7602,6 +7602,298 @@ function tryDeepLink() {
 })();
 
 
+
+// ============================================================
+// COPY TO ANOTHER ITEM — copy chosen sections (or single rows such as one BOM part) from one
+// existing item to another existing item, photos included. Photos are COPIED as new Drive files in
+// the target's own photo folder, never shared by link, so deleting a photo on one item can't break the other.
+// ============================================================
+(function installCopyTool() {
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const DRIVE_RE = /^https:\/\/drive\.google\.com\/thumbnail\?id=([^&]+)/;
+    const clone = o => JSON.parse(JSON.stringify(o));
+
+    function groups() {
+        const keys = Object.keys(createBlankItem(0));
+        const pick = (re, extra) => keys.filter(k => re.test(k)).concat(extra || []);
+        return [
+            { key: 'identity', label: 'Product Identity (description, ASIN, UPC, GTIN)', fields: ['description', 'asin', 'upc', 'gtin', 'show_gtin'] },
+            { key: 'photos', label: 'Multi-Angle Photos + Package Content', fields: primaryPhotoKeys.map(p => p.key).concat(['photo_remarks', 'package_contents']) },
+            { key: 'components', label: 'Component Details (BOM)', fields: ['components'], rows: 'components', rowLabel: r => `Part ${r.id || ''} — ${r.description || '(no description)'}${r.material ? ' · ' + r.material : ''}` },
+            { key: 'mc', label: 'Outer Master Carton Packaging', fields: pick(/^(show_)?mc_/, ['show_master_carton']) },
+            { key: 'ic', label: 'Inner Case Packaging', fields: pick(/^(show_)?ic_/, ['show_inner_case']) },
+            { key: 'gb', label: 'Product Packaging (Gift Box)', fields: pick(/^(show_)?gb_/, ['show_gift_box']) },
+            { key: 'bp', label: 'Blister Packaging', fields: pick(/^(show_)?bp_/, ['show_blister']) },
+            { key: 'marketing', label: 'Marketing Features & Benefits (+ Instructions artwork)', fields: ['show_marketing', 'features', 'benefits', 'instructions_photo'], dynamic: /^(features|benefits)_photo_\d+$/ },
+            { key: 'compliance', label: 'Compliance / Testing', fields: ['show_compliance', 'compliance'], rows: 'compliance', flag: 'show_compliance', rowLabel: r => `Ref ${r.id || ''} — ${r.test || '(no test)'}` },
+            { key: 'ctq', label: 'CTQ (Critical to Quality)', fields: ['show_ctq', 'ctq'], rows: 'ctq', flag: 'show_ctq', rowLabel: r => `#${r.id || ''} — ${r.factor || '(no factor)'}` },
+            { key: 'drawing', label: 'Engineering Drawing', fields: ['show_drawing', 'drawing_photo', 'drawings'], rows: 'drawings', flag: 'show_drawing', rowLabel: r => `#${r.id || ''} — ${r.name || '(unnamed drawing)'}` },
+            { key: 'other', label: 'Other / Material Components', fields: ['show_other_components', 'other_components_photo', 'other_components'], rows: 'other_components', flag: 'show_other_components', rowLabel: r => `#${r.id || r.item || ''} — ${r.component_desc || r.item || '(no description)'}` },
+            { key: 'auth', label: 'Authorization & Sign-Off page (on/off)', fields: ['show_authorization'] }
+        ];
+    }
+    function dataOf(item, g, onlyRows) {                 // the values of one group, cloned
+        const o = {};
+        g.fields.forEach(k => { if (item[k] !== undefined) o[k] = clone(item[k]); });
+        if (g.dynamic) Object.keys(item).forEach(k => { if (g.dynamic.test(k)) o[k] = item[k]; });
+        if (onlyRows) { const set = onlyRows; o[g.rows] = (item[g.rows] || []).filter((_, i) => set.has(i)).map(clone); delete o[g.flag]; }
+        return o;
+    }
+    const isEmpty = v => {
+        if (v == null) return true;
+        if (typeof v === 'string') return v.trim() === '';
+        if (typeof v === 'boolean') return true;
+        if (typeof v === 'number') return false;
+        if (Array.isArray(v)) return v.every(isEmpty);
+        return Object.keys(v).filter(k => k !== 'id' && k !== 'item').every(k => isEmpty(v[k]));
+    };
+    const hasData = (item, g) => !isEmpty(Object.fromEntries(Object.entries(dataOf(item, g)).filter(([k]) => !/^show_/.test(k))));
+    function countPhotos(v) {
+        if (typeof v === 'string') return (DRIVE_RE.test(v) || v.startsWith('data:image')) ? 1 : 0;
+        if (Array.isArray(v)) return v.reduce((n, x) => n + countPhotos(x), 0);
+        if (v && typeof v === 'object') return Object.values(v).reduce((n, x) => n + countPhotos(x), 0);
+        return 0;
+    }
+
+    let S = null;           // modal state
+
+    function overlay() {
+        let el = document.getElementById('cp-overlay');
+        if (!el) {
+            el = document.createElement('div'); el.id = 'cp-overlay';
+            el.style.cssText = 'position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,.78);display:flex;align-items:center;justify-content:center;padding:20px';
+            document.body.appendChild(el);
+        }
+        return el;
+    }
+    function close() { const el = document.getElementById('cp-overlay'); if (el) el.remove(); S = null; }
+    function box(inner, wide) {
+        overlay().innerHTML = `<div style="background:#0b0f14;border:1px solid #2a3340;border-radius:14px;width:100%;max-width:${wide || 760}px;max-height:92vh;overflow:auto;padding:22px;color:#e5e7eb;font-size:13px">${inner}</div>`;
+    }
+    const itemLabel = it => `<b style="color:#44D62C">${esc(it.sku_no || '(no SKU)')}</b> <span style="color:#9ca3af">· ID ${esc(it.id)} · ${esc(it.description || '(no description)')}</span>`;
+    const btn = (id, txt, kind) => `<button id="${id}" style="padding:9px 18px;border-radius:9px;font-weight:800;font-size:12px;cursor:pointer;border:1px solid ${kind === 'go' ? '#44D62C' : '#374151'};background:${kind === 'go' ? '#44D62C' : '#111827'};color:${kind === 'go' ? '#000' : '#d1d5db'}">${txt}</button>`;
+
+    function picker(id, label, excludeId, selId) {
+        return `<div style="flex:1;min-width:260px"><div style="font-weight:800;font-size:11px;letter-spacing:.08em;color:#9ca3af;text-transform:uppercase;margin-bottom:6px">${label}</div>
+            <input id="${id}-q" placeholder="Search SKU, ID or description…" style="width:100%;box-sizing:border-box;background:#030712;border:1px solid #374151;border-radius:8px;padding:7px 9px;color:#fff;font-size:12px;margin-bottom:6px">
+            <select id="${id}" size="7" style="width:100%;box-sizing:border-box;background:#030712;border:1px solid #374151;border-radius:8px;color:#e5e7eb;font-size:12px"></select></div>`;
+    }
+    function fillPicker(id, filter, selId, excludeId) {
+        const sel = document.getElementById(id); if (!sel) return;
+        const f = String(filter || '').toLowerCase();
+        sel.innerHTML = currentData.main_items.filter(it => String(it.id) !== String(excludeId == null ? '' : excludeId))
+            .filter(it => !f || `${it.id} ${it.sku_no} ${it.description}`.toLowerCase().includes(f))
+            .map(it => `<option value="${esc(it.id)}"${String(it.id) === String(selId) ? ' selected' : ''}>${esc(it.sku_no || '')} — ${esc((it.description || '').slice(0, 60))} (ID ${esc(it.id)})</option>`).join('');
+    }
+    const byId = id => currentData.main_items.find(x => String(x.id) === String(id));
+
+    function renderPick() {
+        const src = S.srcFixed ? byId(S.srcId) : null;
+        const gs = S.groups;
+        const srcItem = byId(S.srcId);
+        let rowsHtml = '';
+        gs.forEach(g => {
+            const has = srcItem ? hasData(srcItem, g) : false;
+            const ph = srcItem ? countPhotos(dataOf(srcItem, g)) : 0;
+            const checked = S.sel.has(g.key);
+            rowsHtml += `<div style="border:1px solid #1f2937;border-radius:9px;padding:8px 11px;margin-bottom:6px;background:${has ? '#0f1520' : '#080b10'};opacity:${has ? 1 : .45}">
+                <label style="display:flex;align-items:center;gap:9px;cursor:${has ? 'pointer' : 'not-allowed'}">
+                    <input type="checkbox" data-g="${g.key}" ${checked ? 'checked' : ''} ${has ? '' : 'disabled'} style="accent-color:#44D62C;width:15px;height:15px">
+                    <span style="font-weight:700">${esc(g.label)}</span>
+                    <span style="margin-left:auto;font-size:11px;color:#6b7280">${has ? (ph ? ph + ' photo' + (ph > 1 ? 's' : '') : 'no photos') : 'empty on source'}</span>
+                </label>`;
+            if (g.rows && has) {
+                const list = srcItem[g.rows] || [];
+                const rowsWithData = list.map((r, i) => [r, i]).filter(([r]) => !isEmpty(r));
+                if (rowsWithData.length) {
+                    const set = S.rows[g.key] || new Set();
+                    rowsHtml += `<div style="margin:7px 0 2px 24px;padding-left:10px;border-left:2px solid #1f2937;${checked ? 'opacity:.4;pointer-events:none' : ''}">
+                        <div style="font-size:10px;color:#6b7280;margin-bottom:3px">${checked ? 'Whole section selected — individual rows not needed' : 'Or copy only specific rows (they are ADDED to the target’s list):'}</div>
+                        ${rowsWithData.map(([r, i]) => `<label style="display:flex;align-items:center;gap:8px;padding:2px 0;cursor:pointer"><input type="checkbox" data-r="${g.key}:${i}" ${set.has(i) ? 'checked' : ''} style="accent-color:#44D62C"><span style="font-size:12px">${esc(g.rowLabel(r))}${countPhotos(r) ? ' <span style="color:#6b7280">· 📷</span>' : ''}</span></label>`).join('')}
+                    </div>`;
+                }
+            }
+            rowsHtml += `</div>`;
+        });
+        box(`<div style="font-size:17px;font-weight:900;margin-bottom:3px">📋 Copy to Another Item</div>
+            <div style="color:#9ca3af;margin-bottom:14px">Copies the ticked sections — photos included — from the source item into an existing item. SKU and ID are never changed.</div>
+            <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+                ${S.srcFixed ? `<div style="flex:1;min-width:260px"><div style="font-weight:800;font-size:11px;letter-spacing:.08em;color:#9ca3af;text-transform:uppercase;margin-bottom:6px">Copy FROM (source)</div><div style="background:#030712;border:1px solid #374151;border-radius:8px;padding:10px">${srcItem ? itemLabel(srcItem) : ''}</div></div>` : picker('cp-src', 'Copy FROM (source)')}
+                ${picker('cp-tgt', 'Copy TO (target)')}
+            </div>
+            <div style="font-weight:800;font-size:11px;letter-spacing:.08em;color:#9ca3af;text-transform:uppercase;margin-bottom:6px">What to copy <a id="cp-all" style="color:#44D62C;cursor:pointer;margin-left:10px;text-transform:none;letter-spacing:0">Select all</a> <a id="cp-none" style="color:#9ca3af;cursor:pointer;margin-left:8px;text-transform:none;letter-spacing:0">Clear</a></div>
+            <div id="cp-groups">${rowsHtml}</div>
+            ${S.note ? `<div style="color:#fbbf24;font-size:11px;margin-top:6px">${esc(S.note)}</div>` : ''}
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px">${btn('cp-cancel', 'Cancel')}${btn('cp-next', 'Continue →', 'go')}</div>`);
+        wirePick();
+    }
+    function wirePick() {
+        const $ = id => document.getElementById(id);
+        if (!S.srcFixed) {
+            fillPicker('cp-src', '', S.srcId, S.tgtId);
+            $('cp-src-q').oninput = e => fillPicker('cp-src', e.target.value, S.srcId, S.tgtId);
+            $('cp-src').onchange = e => { S.srcId = e.target.value; S.sel.clear(); S.rows = {}; keepScroll(renderPick); };
+        }
+        fillPicker('cp-tgt', '', S.tgtId, S.srcId);
+        $('cp-tgt-q').oninput = e => fillPicker('cp-tgt', e.target.value, S.tgtId, S.srcId);
+        $('cp-tgt').onchange = e => { S.tgtId = e.target.value; };
+        $('cp-cancel').onclick = close;
+        $('cp-all').onclick = () => { const s = byId(S.srcId); S.groups.forEach(g => { if (s && hasData(s, g)) S.sel.add(g.key); }); keepScroll(renderPick); };
+        $('cp-none').onclick = () => { S.sel.clear(); S.rows = {}; keepScroll(renderPick); };
+        document.querySelectorAll('#cp-groups input[data-g]').forEach(cb => cb.onchange = () => { cb.checked ? S.sel.add(cb.dataset.g) : S.sel.delete(cb.dataset.g); keepScroll(renderPick); });
+        document.querySelectorAll('#cp-groups input[data-r]').forEach(cb => cb.onchange = () => {
+            const [k, i] = cb.dataset.r.split(':'); (S.rows[k] = S.rows[k] || new Set());
+            cb.checked ? S.rows[k].add(+i) : S.rows[k].delete(+i);
+        });
+        $('cp-next').onclick = goConfirm;
+    }
+    function keepScroll(fn) { const el = document.querySelector('#cp-overlay > div'); const t = el ? el.scrollTop : 0; fn(); const e2 = document.querySelector('#cp-overlay > div'); if (e2) e2.scrollTop = t; }
+
+    function plan() {                                    // what will happen, per chosen group
+        const src = byId(S.srcId), tgt = byId(S.tgtId), out = [];
+        S.groups.forEach(g => {
+            if (S.sel.has(g.key)) {
+                out.push({ g, mode: 'replace', tgtHas: hasData(tgt, g), data: dataOf(src, g) });
+            } else if (g.rows && S.rows[g.key] && S.rows[g.key].size) {
+                out.push({ g, mode: 'add', tgtHas: hasData(tgt, g), data: dataOf(src, g, S.rows[g.key]), n: S.rows[g.key].size });
+            }
+        });
+        return out;
+    }
+    function goConfirm() {
+        if (!S.srcId || !S.tgtId) { showToast('⚠️', 'Pick both the source and the target item.'); return; }
+        if (String(S.srcId) === String(S.tgtId)) { showToast('⚠️', 'Source and target must be different items.'); return; }
+        const p = plan();
+        if (!p.length) { showToast('⚠️', 'Tick at least one section (or row) to copy.'); return; }
+        const src = byId(S.srcId), tgt = byId(S.tgtId);
+        const rep = p.filter(x => x.mode === 'replace' && x.tgtHas), fill = p.filter(x => x.mode === 'replace' && !x.tgtHas), add = p.filter(x => x.mode === 'add');
+        const photos = p.reduce((n, x) => n + countPhotos(x.data), 0);
+        const li = (arr, f) => arr.map(x => `<li style="margin:2px 0">${esc(x.g.label)}${f ? f(x) : ''}</li>`).join('');
+        box(`<div style="font-size:17px;font-weight:900;margin-bottom:12px">Is this the correct item?</div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+                <div style="flex:1;min-width:240px;background:#030712;border:1px solid #374151;border-radius:9px;padding:10px"><div style="font-size:10px;color:#6b7280;font-weight:800;letter-spacing:.08em">FROM</div>${itemLabel(src)}</div>
+                <div style="flex:1;min-width:240px;background:#1a0f0f;border:1px solid #7f1d1d;border-radius:9px;padding:10px"><div style="font-size:10px;color:#f87171;font-weight:800;letter-spacing:.08em">TO (will be changed)</div>${itemLabel(tgt)}</div>
+            </div>
+            ${rep.length ? `<div style="background:#2a1212;border:1px solid #b91c1c;border-radius:9px;padding:10px 12px;margin-bottom:10px"><div style="font-weight:900;color:#fca5a5;margin-bottom:4px">⚠ These will be REPLACED on ${esc(tgt.sku_no)} (existing data is overwritten):</div><ul style="margin:0 0 0 18px;padding:0">${li(rep)}</ul></div>` : ''}
+            ${add.length ? `<div style="background:#1a1a0d;border:1px solid #854d0e;border-radius:9px;padding:10px 12px;margin-bottom:10px"><div style="font-weight:900;color:#fcd34d;margin-bottom:4px">These rows will be ADDED to the end of ${esc(tgt.sku_no)}'s list:</div><ul style="margin:0 0 0 18px;padding:0">${li(add, x => ` — ${x.n} row${x.n > 1 ? 's' : ''}`)}</ul></div>` : ''}
+            ${fill.length ? `<div style="background:#0d1a0f;border:1px solid #166534;border-radius:9px;padding:10px 12px;margin-bottom:10px"><div style="font-weight:900;color:#86efac;margin-bottom:4px">These are empty on ${esc(tgt.sku_no)} and will be filled:</div><ul style="margin:0 0 0 18px;padding:0">${li(fill)}</ul></div>` : ''}
+            <div style="color:#9ca3af;font-size:12px">${photos} photo${photos === 1 ? '' : 's'} will be copied as new files into ${esc(tgt.sku_no)}'s own photo folder. The change is saved right away and recorded in ${esc(tgt.sku_no)}'s revision history. Previous photos on the target are left in Drive (nothing is deleted).</div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">${btn('cp-back', '← Back')}${btn('cp-go', 'Yes, copy to ' + esc(tgt.sku_no || 'this item'), 'go')}</div>`, 700);
+        document.getElementById('cp-back').onclick = renderPick;
+        document.getElementById('cp-go').onclick = run;
+    }
+
+    function walk(v, fn) {                               // replace every string leaf with fn(string)
+        if (typeof v === 'string') return fn(v);
+        if (Array.isArray(v)) return v.map(x => walk(x, fn));
+        if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach(k => { o[k] = walk(v[k], fn); }); return o; }
+        return v;
+    }
+    function progress(msg) { box(`<div style="padding:26px;text-align:center"><div style="font-size:30px">⏳</div><div style="font-weight:800;margin-top:8px">${esc(msg)}</div><div style="color:#6b7280;font-size:11px;margin-top:6px">Please keep this tab open.</div></div>`, 420); }
+
+    async function run() {
+        const p = plan(); const src = byId(S.srcId), tgt0 = byId(S.tgtId);
+        if (!isFullAccess()) { showToast('🔒', 'View-only access.'); close(); return; }
+        if (!driveSessionIsLive()) { showToast('🔒', 'Connect to Google first, then try again.'); return; }
+        try {
+            progress('Checking nobody is editing ' + tgt0.sku_no + '…');
+            const r = await sdbLockRead(tgt0.id, tgt0.sku_no);
+            const by = sdbLockBlocker(r);
+            if (by) { showToast('🔒', `${by} is editing ${tgt0.sku_no} right now. Try again after they submit.`, null, null, 12000); renderPick(); return; }
+
+            // 1. copy every Drive photo in the payload
+            const ids = new Set();
+            p.forEach(x => walk(x.data, s => { const m = DRIVE_RE.exec(s); if (m) ids.add(m[1]); return s; }));
+            const map = new Map(); let n = 0, failed = 0;
+            if (ids.size) {
+                const folder = await getOrCreatePhotoFolder(tgt0.sku_no || 'unknown-sku');
+                for (const id of ids) {
+                    n++; progress(`Copying photo ${n} of ${ids.size}…`);
+                    try {
+                        const f = await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${id}/copy?supportsAllDrives=true&fields=id`, 'POST', { name: `${tgt0.sku_no}-copy-${Date.now()}-${n}.png`, parents: [folder] });
+                        await gdriveFetch(`https://www.googleapis.com/drive/v3/files/${f.id}/permissions?supportsAllDrives=true`, 'POST', { role: 'reader', type: 'anyone' });
+                        map.set(id, f.id);
+                    } catch (e) { console.error('Photo copy failed', id, e); map.set(id, null); failed++; }
+                }
+            }
+            const remap = s => { const m = DRIVE_RE.exec(s); if (!m) return s; const nid = map.get(m[1]); return nid ? s.replace(m[1], nid) : ''; };
+
+            // 2. apply to the live target (re-find it: the list may have refreshed while photos copied)
+            progress('Saving…');
+            const tgt = byId(S.tgtId); if (!tgt) throw new Error('target item no longer exists');
+            const labels = [];
+            p.forEach(x => {
+                const d = walk(x.data, remap), g = x.g;
+                if (x.mode === 'replace') {
+                    if (g.dynamic) Object.keys(tgt).forEach(k => { if (g.dynamic.test(k)) delete tgt[k]; });
+                    Object.keys(d).forEach(k => { tgt[k] = d[k]; });
+                    g.fields.forEach(k => { if (d[k] === undefined && src[k] === undefined) delete tgt[k]; });
+                    labels.push(g.label.replace(/ \(.*\)$/, ''));
+                } else {
+                    let list = (tgt[g.rows] || []).slice();
+                    if (list.length && list.every(isEmpty)) list = [];                  // drop the lone blank starter row
+                    list = list.concat(d[g.rows]);
+                    list.forEach((r, i) => { r.id = String(i + 1); if (g.rows === 'other_components') r.item = String(i + 1); });
+                    tgt[g.rows] = list;
+                    if (g.flag) tgt[g.flag] = true;
+                    labels.push(`${g.label.replace(/ \(.*\)$/, '')} (${x.n} row${x.n > 1 ? 's' : ''})`);
+                }
+            });
+            if (!tgt.revision_history) tgt.revision_history = [];
+            tgt.revision_history.push({ rev: tgt.revision_history.length + 1, date: new Date().toISOString(), editor: currentEditorName(), reason: `Copied from ${src.sku_no}: ${labels.join(', ')}` });
+            sdbLastMutation = Date.now();
+            buildConsolidatedView(); updateConsolidatedBadge();
+            const ok = await saveData();
+            triggerSheetAutoSync();
+            close();
+            const photoMsg = ids.size ? ` ${ids.size - failed} photo${ids.size - failed === 1 ? '' : 's'} copied${failed ? `, ${failed} could not be copied (left blank)` : ''}.` : '';
+            if (ok) showToast('✅', `Copied ${labels.length} item${labels.length > 1 ? 's' : ''} from ${src.sku_no} to ${tgt.sku_no}.${photoMsg}`, null, null, 12000);
+            else showToast('⚠️', `Copied to ${tgt.sku_no} on this screen, but saving to Google failed — it will keep retrying.${photoMsg}`, null, null, 15000);
+        } catch (e) {
+            console.error('Copy failed', e);
+            showToast('❌', 'Copy failed: ' + e.message + '. Nothing was changed on the target unless you see it in the list.', null, null, 15000);
+            renderPick();
+        }
+    }
+
+    window.openCopyTool = function (from) {
+        if (!isFullAccess()) { showToast('🔒', 'View-only access.'); return; }
+        if (!driveSessionIsLive()) { showToast('🔒', 'Connect to Google first.'); return; }
+        let srcId = null, fixed = false, note = '';
+        if (from === 'editor') {
+            if (editingIdx === null || editingIdx === undefined || !currentData.main_items[editingIdx]) { showToast('⚠️', 'Submit this new entry first, then you can copy from it.'); return; }
+            srcId = currentData.main_items[editingIdx].id; fixed = true;
+            try { if (editorHasChanges()) note = 'Note: only the SAVED version of this item is copied. Submit your current edits first if you want them included.'; } catch (e) {}
+        } else {
+            const ch = document.querySelectorAll('.consolidated-checkbox:checked');
+            if (ch.length === 1) { const it = currentData.main_items[parseInt(ch[0].value)]; if (it) srcId = it.id; }
+        }
+        if (currentData.main_items.length < 2) { showToast('⚠️', 'You need at least two items to copy between.'); return; }
+        S = { groups: groups(), srcId, tgtId: null, srcFixed: fixed, sel: new Set(), rows: {}, note };
+        renderPick();
+    };
+    // button in the editor's top bar
+    const bar = document.querySelector('#sheet1-view button[onclick^="openMassUpload"]');
+    if (bar && !document.getElementById('cp-editor-btn')) {
+        const b = document.createElement('button');
+        b.id = 'cp-editor-btn'; b.setAttribute('onclick', "openCopyTool('editor')");
+        b.className = 'bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white text-xs font-black px-4 py-2 rounded-lg cursor-pointer shadow flex items-center gap-1.5';
+        b.innerHTML = '📋 Copy to Item';
+        bar.parentElement.insertBefore(b, bar);
+    }
+    // button in the Consolidated Manager header
+    const dup = document.querySelector('#consolidated-view button[onclick^="duplicateSelected"]');
+    if (dup && !document.getElementById('cp-list-btn')) {
+        const b = document.createElement('button');
+        b.id = 'cp-list-btn'; b.setAttribute('onclick', "openCopyTool('list')");
+        b.className = dup.className; b.title = 'Copy sections and photos from one item to another existing item';
+        b.innerHTML = '📑 Copy to Another Item';
+        dup.parentElement.insertBefore(b, dup);
+    }
+    const st = document.createElement('style');
+    st.textContent = 'body.viewer-mode [onclick^="openCopyTool"] { display: none !important; }';
+    document.head.appendChild(st);
+})();
 </script>
 </body>
 </html>
